@@ -59,7 +59,11 @@ export function Step1Welcome({
       total={TOTAL_STEPS}
       footer={
         <>
-          <Button onClick={onNext} disabled={!canStart}>
+          <Button
+            onClick={onNext}
+            disabled={!canStart}
+            disabledReason="Cần đồng ý điều khoản và chính sách để bắt đầu."
+          >
             Bắt đầu
           </Button>
           <Button variant="ghost" onClick={onSignIn}>
@@ -229,7 +233,12 @@ export function Step2Auth({
       onBack={onBack}
       footer={
         <>
-          <Button onClick={submit} disabled={!canSubmit} loading={busy}>
+          <Button
+            onClick={submit}
+            disabled={!canSubmit}
+            loading={busy}
+            disabledReason="Nhập email và mật khẩu hợp lệ (tối thiểu 6 ký tự) để tiếp tục."
+          >
             {mode === "signup" ? "Tạo tài khoản" : "Đăng nhập"}
           </Button>
           <Button
@@ -307,6 +316,7 @@ export function Step3Manager({
         <Button
           onClick={() => (valid ? onNext() : setTouched(true))}
           disabled={!valid}
+          disabledReason="Cần nhập họ tên để tiếp tục."
         >
           Tiếp tục
         </Button>
@@ -359,7 +369,11 @@ export function Step4BusinessModel({
       total={TOTAL_STEPS}
       onBack={onBack}
       footer={
-        <Button onClick={onNext} disabled={data.businessModel === null}>
+        <Button
+          onClick={onNext}
+          disabled={data.businessModel === null}
+          disabledReason="Chọn loại hình kinh doanh để tiếp tục."
+        >
           Tiếp tục
         </Button>
       }
@@ -414,6 +428,15 @@ export function Step5StoreProfile({
         <Button
           onClick={() => (canNext ? onNext() : setTouched(true))}
           disabled={!canNext}
+          disabledReason={
+            !nameOk
+              ? "Cần nhập tên cửa hàng để tiếp tục."
+              : !addrOk
+                ? "Cần điền địa chỉ để tiếp tục."
+                : !tax.valid
+                  ? "Mã số thuế phải có 10 hoặc 13 chữ số."
+                  : undefined
+          }
         >
           Tiếp tục
         </Button>
@@ -505,7 +528,11 @@ export function Step6Tax({
       total={TOTAL_STEPS}
       onBack={onBack}
       footer={
-        <Button onClick={onNext} disabled={!canNext}>
+        <Button
+          onClick={onNext}
+          disabled={!canNext}
+          disabledReason="Chọn tình trạng đăng ký và kỳ khai thuế để tiếp tục."
+        >
           Tiếp tục
         </Button>
       }

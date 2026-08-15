@@ -8,6 +8,7 @@ export function Button({
   variant = "primary",
   loading = false,
   disabled,
+  disabledReason,
   onClick,
   type = "button",
 }: {
@@ -15,26 +16,41 @@ export function Button({
   variant?: BtnVariant;
   loading?: boolean;
   disabled?: boolean;
+  /**
+   * Why the button is disabled, shown as a small hint beneath it. Surfacing the
+   * blocking reason (instead of a silently-greyed CTA) is applied to every
+   * onboarding step so the user always knows what's missing.
+   */
+  disabledReason?: string;
   onClick?: () => void;
   type?: "button" | "submit";
 }) {
+  const showReason = Boolean(disabled) && !loading && Boolean(disabledReason);
   return (
-    <button
-      type={type}
-      className={`btn btn--${variant}`}
-      disabled={disabled || loading}
-      onClick={onClick}
-    >
-      {loading ? (
-        <span
-          className={`spinner spinner--sm ${
-            variant === "primary" || variant === "navy" ? "spinner--light" : ""
-          }`}
-        />
-      ) : (
-        children
+    <>
+      <button
+        type={type}
+        className={`btn btn--${variant}`}
+        disabled={disabled || loading}
+        aria-describedby={showReason ? "btn-reason" : undefined}
+        onClick={onClick}
+      >
+        {loading ? (
+          <span
+            className={`spinner spinner--sm ${
+              variant === "primary" || variant === "navy" ? "spinner--light" : ""
+            }`}
+          />
+        ) : (
+          children
+        )}
+      </button>
+      {showReason && (
+        <div id="btn-reason" className="btn-reason" role="status">
+          {disabledReason}
+        </div>
       )}
-    </button>
+    </>
   );
 }
 

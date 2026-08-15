@@ -11,13 +11,11 @@ import { Home } from "./dashboard/Home";
 import { AttentionListPage } from "./dashboard/AttentionListPage";
 import { TaxPage } from "./dashboard/TaxPage";
 import { SettingsPage } from "./dashboard/SettingsPage";
-import {
-  InventoryPage,
-  OrdersPage,
-  POSPage,
-  QRScreen,
-  ReportsPage,
-} from "./dashboard/pages";
+import { QRScreen, ReportsPage } from "./dashboard/pages";
+import { SalesFlow } from "./sales/SalesFlow";
+import { OrdersPage } from "./orders/OrdersPage";
+import { OrderDetail } from "./orders/OrderDetail";
+import { InventoryPage } from "./inventory/InventoryPage";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -75,8 +73,9 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<Home />} />
             <Route path="/viec-can-xu-ly" element={<AttentionListPage />} />
-            <Route path="/ban-hang" element={<POSPage />} />
+            <Route path="/ban-hang" element={<SalesFlow />} />
             <Route path="/don-hang" element={<OrdersPage />} />
+            <Route path="/don-hang/:id" element={<OrderDetail />} />
             <Route path="/kho" element={<InventoryPage />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />

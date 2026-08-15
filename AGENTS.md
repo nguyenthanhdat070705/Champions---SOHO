@@ -3,11 +3,15 @@
 SoHo "Thiết lập cửa hàng" — a mobile-first, Vietnamese, MoMo-style **PWA** for
 household businesses. Functional 01: onboarding that creates the store's
 operating profile. Functional 02: the "Trang Hôm nay" (Today) dashboard —
-read-only daily revenue/attention view (no selling yet). Vite + React + TS SPA
-talking **directly to Supabase** from the client, served by a combined Node
-server that also hosts the pre-existing PayOS payment API. Specs:
+read-only daily revenue/attention view. Functional 03: "Tạo bill & thanh toán" —
+the POS golden flow (chọn hàng → giỏ → cash/QR → biên nhận), returns/refunds and
+inventory. Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under
+RLS; **F3 money/inventory mutations go through the combined Node server**, which
+also hosts the pre-existing PayOS API. Specs:
 `/home/nguye/firstmate/data/soho-onboarding-app/soho-functional-01.md`,
-`/home/nguye/firstmate/data/soho-today-dashboard/soho-functional-02.md`.
+`/home/nguye/firstmate/data/soho-today-dashboard/soho-functional-02.md`,
+`/home/nguye/firstmate/data/soho-pos-qr/soho-functional-02-03.md` (F03 section
+starts at "ĐẶC TẢ FUNCTIONAL 03").
 
 ## Commands
 - `npm run dev` — Vite dev server.
@@ -33,7 +37,19 @@ server that also hosts the pre-existing PayOS payment API. Specs:
   unit-tested), `enums.ts` (DB enum values + VN labels), `config.ts`.
 - Combined server: `server/` + `api/payos/` were **ported from** the existing Railway service
   (repo `github.com/nguyenthanhdat070705/Champions---SOHO`). `server/application.js` is the only
-  adapted file (serves `dist/` with SPA deep-link fallback; PayOS routes + `/health` unchanged).
+  adapted file (serves `dist/` with SPA deep-link fallback; PayOS routes + `/health` unchanged; it
+  also dispatches `/v1/*` to the F3 router).
+- **Functional 03 server (`server/f3/`):** every money/inventory mutation runs in ONE real Postgres
+  transaction via the `pg` **session pooler** (`DATABASE_URL`, server-only `.env`, never committed).
+  `router.js` (spec-11 routes) → `auth.js` (verify JWT + membership/role — the pooler bypasses RLS so
+  this is the ONLY tenant guard), `sales.js` (preview/draft/lock), `payments.js` (cash finalize + QR
+  create/confirm/cancel), `returns.js`, `catalog.js`, `receipts.js`. `pricing.js` is pure + unit-tested
+  (`test/f3-pricing.test.js`); error contract in `errors.js` (`test/f3-errors.test.js`). PayOS calls via
+  `payos.js` (reuses `server/payos/client.js`).
+- **Functional 03 client:** `src/sales/` (the `SalesFlow` multi-step golden flow + `cartStore.ts` pure
+  cart, unit-tested), `src/orders/` (bill list + detail + return flow), `src/inventory/`. All F3 server
+  calls go through `src/lib/api.ts` (typed, attaches the Supabase bearer, maps the spec-11.1 error
+  contract to `ApiError.code`). QR payload rendered with the `qrcode` dep.
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -57,6 +73,29 @@ server that also hosts the pre-existing PayOS payment API. Specs:
   Clients are read-only on orders/payments/etc. — seed verification data with privileged access via
   `test/seed-today-dashboard.sql` (parameterized by `:merchant_id`; covers spec MET-01..07 +
   INV-01/02 with expected values in comments). Business day = Asia/Ho_Chi_Minh 00:00.
+- **F3 partial refunds keep `orders.status='paid'`, NOT `partially_refunded`.** The deployed F2
+  `get_today_dashboard` RPC counts gross only for `status in ('paid','refunded')`; setting an order to
+  `partially_refunded` would silently drop it from gross. Only a FULLY-returned bill is set to
+  `refunded` (still counted; the succeeded refund is subtracted). This keeps gross/refund/net
+  reconciliation exact — do not "fix" it to use `partially_refunded` without also fixing the RPC.
+- **F3 schema quirks (deployed migration 03, don't re-derive):** `refund_status` has only
+  `pending/succeeded/failed` (NO `cancelled`); `has_merchant_role(p_merchant_id, p_roles)` is 2-arg (the
+  spec's finalize skeleton shows 3 — ignore it, F3 enforces roles in Node, not via that fn). Cashier
+  manual-discount ceiling is a Node constant `CASHIER_DISCOUNT_LIMIT_PCT` in `sales.js` (no
+  merchant_settings column). ai_transaction_suggestions unique is `(merchant_id, source_hash)`.
+- **Idempotency (F3):** payment/refund POSTs need an `Idempotency-Key` header, unique per
+  (merchant, key). `finalizeCash` re-checks the key AFTER taking the order `FOR UPDATE` lock so two
+  concurrent same-key taps return the SAME payment (SALE-03), not a 409. `provider_event_id` = PayOS
+  webhook `reference` dedupes duplicate webhooks (QR-03).
+- **PayOS webhook (`/api/payos/webhook`)**: keeps the byte-compatible test-event + forward behavior;
+  when `DATABASE_URL` is set it instead drives the F3 confirm transaction. Real webhooks can't reach a
+  laptop, so the **dev-only** `POST /v1/dev/payos/simulate` (guarded by `SOHO_DEV_ENDPOINTS=1` +
+  non-production `NODE_ENV`) confirms QR locally. returnUrl / "Đã chuyển khoản" NEVER mark paid — only a
+  verified webhook (or server reconcile) does.
+- **F3 live E2E:** `node --env-file=.env test/f3-e2e.mjs` (needs the server running with `.env`) runs the
+  whole spec 13.3 matrix (SALE/INV/QR/RET/RLS) against the real DB + PayOS on its own throwaway merchant
+  (`soho-crew-test+f3@soho.test`). It is NOT in `npm test` (not a `*.test.js`); `npm test` must run
+  WITHOUT `DATABASE_URL` in the env or the PayOS-forward server test fails.
 
 ## Maintaining this file
 

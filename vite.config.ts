@@ -12,5 +12,12 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    // In dev the SPA runs on :5173 and the combined API server on :3000.
+    // Proxy the Functional 03 API + PayOS routes so same-origin fetch works
+    // exactly as it will in production (combined server serves both).
+    proxy: {
+      "/v1": "http://localhost:3000",
+      "/api": "http://localhost:3000",
+    },
   },
 });

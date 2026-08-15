@@ -1,0 +1,105 @@
+// The Functional 03 error contract (spec 11.1). Domain errors carry a stable
+// `code` the mobile UI switches on, and an HTTP status. Keep the codes and
+// user-facing Vietnamese messages in sync with src/lib/api.ts on the client.
+
+/** HTTP status for each domain error code (spec 11.1 + auth/validation). */
+export const ERROR_STATUS = {
+  // Validation / auth
+  VALIDATION: 400,
+  IDEMPOTENCY_KEY_REQUIRED: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  ORDER_NOT_FOUND: 404,
+  PAYMENT_NOT_FOUND: 404,
+  // Concurrency / pricing (spec 11.1)
+  VERSION_CONFLICT: 409,
+  PRICE_CHANGED: 409,
+  INSUFFICIENT_STOCK: 409,
+  PAYMENT_ALREADY_SUCCEEDED: 409,
+  PAYMENT_PENDING: 409,
+  IDEMPOTENCY_PAYLOAD_MISMATCH: 409,
+  REFUND_EXCEEDS_AVAILABLE: 409,
+  ORDER_NOT_PAYABLE: 409,
+  // Discount / connection
+  DISCOUNT_NOT_ALLOWED: 403,
+  QR_CONNECTION_UNAVAILABLE: 400,
+  INVALID_CASH_AMOUNT: 400,
+  // Infra
+  OFFLINE: 503,
+  PROVIDER_ERROR: 502,
+  INTERNAL: 500,
+};
+
+/** Default Vietnamese user-facing message per code (spec 11.1). */
+export const ERROR_MESSAGE = {
+  VALIDATION: "Dữ liệu không hợp lệ.",
+  IDEMPOTENCY_KEY_REQUIRED: "Thiếu Idempotency-Key.",
+  UNAUTHORIZED: "Bạn cần đăng nhập.",
+  FORBIDDEN: "Bạn không có quyền thực hiện thao tác này.",
+  NOT_FOUND: "Không tìm thấy.",
+  ORDER_NOT_FOUND: "Không tìm thấy bill.",
+  PAYMENT_NOT_FOUND: "Không tìm thấy giao dịch.",
+  VERSION_CONFLICT: "Giỏ đã thay đổi ở thiết bị khác. Vui lòng tải lại bill.",
+  PRICE_CHANGED: "Giá hoặc khuyến mãi đã thay đổi. Vui lòng kiểm tra lại.",
+  INSUFFICIENT_STOCK: "Không đủ tồn kho.",
+  PAYMENT_ALREADY_SUCCEEDED: "Bill đã được thanh toán.",
+  PAYMENT_PENDING: "Đang có mã QR còn hiệu lực cho bill này.",
+  IDEMPOTENCY_PAYLOAD_MISMATCH: "Yêu cầu trùng khóa nhưng khác nội dung.",
+  REFUND_EXCEEDS_AVAILABLE: "Số tiền hoàn vượt quá số còn có thể hoàn.",
+  ORDER_NOT_PAYABLE: "Bill không ở trạng thái có thể thu tiền.",
+  DISCOUNT_NOT_ALLOWED: "Giảm giá vượt quyền hoặc vượt trần cho phép.",
+  QR_CONNECTION_UNAVAILABLE: "Kết nối QR chưa sẵn sàng. Hãy chọn tiền mặt hoặc kiểm tra Cài đặt.",
+  INVALID_CASH_AMOUNT: "Số tiền khách đưa chưa hợp lệ.",
+  OFFLINE: "Không kết nối được máy chủ.",
+  PROVIDER_ERROR: "Đối tác thanh toán tạm thời lỗi. Vui lòng thử lại.",
+  INTERNAL: "Có lỗi xảy ra. Vui lòng thử lại.",
+};
+
+export class DomainError extends Error {
+  /**
+   * @param {string} code    stable error code (a key of ERROR_STATUS)
+   * @param {string} [message] override user-facing message
+   * @param {object} [details] extra structured data for the UI (e.g. price diff)
+   */
+  constructor(code, message, details) {
+    super(message || ERROR_MESSAGE[code] || code);
+    this.name = "DomainError";
+    this.code = code;
+    this.status = ERROR_STATUS[code] || 400;
+    if (details) this.details = details;
+  }
+}
+
+/** Convenience thrower. */
+export function fail(code, message, details) {
+  throw new DomainError(code, message, details);
+}
+
+/**
+ * Map a raw Postgres error to a DomainError where a constraint stands in for a
+ * business rule, so the UI still gets a clean code instead of a 500.
+ */
+export function mapPgError(err) {
+  if (err instanceof DomainError) return err;
+  const msg = String(err?.message || "");
+  // A raised exception message from a function/trigger, e.g. 'FORBIDDEN'.
+  if (err?.code === "P0001") {
+    const raised = msg.replace(/^.*?:\s*/, "").trim();
+    if (ERROR_STATUS[raised]) return new DomainError(raised);
+  }
+  // Unique violation on the one-successful-payment guard → already paid.
+  if (err?.code === "23505") {
+    if (/one_successful_payment_per_order/.test(msg)) {
+      return new DomainError("PAYMENT_ALREADY_SUCCEEDED");
+    }
+    if (/idempotency/.test(msg)) {
+      return new DomainError("IDEMPOTENCY_PAYLOAD_MISMATCH");
+    }
+  }
+  // Not-null / check violations surface as validation problems, not 500s.
+  if (err?.code === "23514" || err?.code === "23502") {
+    return new DomainError("VALIDATION", `Ràng buộc dữ liệu: ${msg}`);
+  }
+  return err;
+}

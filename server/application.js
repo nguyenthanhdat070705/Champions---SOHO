@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import createPaymentHandler from "../api/payos/create-payment.js";
 import paymentHandler from "../api/payos/payment.js";
 import webhookHandler from "../api/payos/webhook.js";
+import { handleF3Request } from "./f3/router.js";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // The SPA build output. In production `npm run build` emits the Vite bundle to
@@ -223,6 +224,16 @@ export function createApplicationServer({ siteRoot = defaultSiteRoot } = {}) {
         await apiHandler(request, response);
         if (!response.writableEnded) response.end();
         return;
+      }
+
+      // Functional 03 API (server-side money/inventory paths). The router reads
+      // its own body from the untouched stream and sends the response itself.
+      if (pathname.startsWith("/v1/")) {
+        const handled = await handleF3Request(request, response, url);
+        if (handled) {
+          if (!response.writableEnded) response.end();
+          return;
+        }
       }
 
       if (!["GET", "HEAD"].includes(request.method)) {
