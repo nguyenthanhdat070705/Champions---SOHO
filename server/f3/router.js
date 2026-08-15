@@ -17,6 +17,7 @@ import {
 } from "./payments.js";
 import { returnsPreview, createReturn, confirmRefund, listReturns } from "./returns.js";
 import { renderReceiptHtml } from "./receipts.js";
+import { assistantChat } from "../assistant/index.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -266,6 +267,18 @@ const ROUTES = [
     await requireMembership(userId, merchantId, SELLING_ROLES);
     const body = await readBody(c.req);
     const result = await confirmRefund(merchantId, userId, refundId, body.reference);
+    sendJson(c.res, 200, result);
+  }],
+
+  // ── AI Assistant (Functional 10) — read-only, tenant-scoped ──────────────
+  ["POST", /^\/v1\/assistant\/chat$/, async (c) => {
+    const { userId } = await verifyUser(c.req);
+    const body = await readBody(c.req);
+    // Any ACTIVE member of the merchant may use the read-only assistant; the
+    // membership check is the tenant guard (the pooler bypasses RLS). A user who
+    // is not a member of body.merchantId gets FORBIDDEN — no cross-tenant facts.
+    await requireMembership(userId, body.merchantId);
+    const result = await assistantChat(query, body.merchantId, body.messages || []);
     sendJson(c.res, 200, result);
   }],
 

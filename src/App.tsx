@@ -16,6 +16,7 @@ import { SalesFlow } from "./sales/SalesFlow";
 import { OrdersPage } from "./orders/OrdersPage";
 import { OrderDetail } from "./orders/OrderDetail";
 import { InventoryPage } from "./inventory/InventoryPage";
+import { AssistantPage } from "./assistant/AssistantPage";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -72,6 +73,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<Home />} />
+            <Route path="/tro-ly" element={<AssistantPage />} />
             <Route path="/viec-can-xu-ly" element={<AttentionListPage />} />
             <Route path="/ban-hang" element={<SalesFlow />} />
             <Route path="/don-hang" element={<OrdersPage />} />

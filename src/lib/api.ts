@@ -145,4 +145,20 @@ export const api = {
   confirmRefund: (refundId: string, reference?: string) =>
     request<{ refundId: string; status: string; orderId: string }>("POST", `/v1/refunds/${refundId}/confirm`, { body: { reference } }),
   receiptUrl: (orderId: string) => `/v1/orders/${orderId}/receipt`,
+  chat: (merchantId: string, messages: ChatTurn[], signal?: AbortSignal) =>
+    request<ChatResponse>("POST", "/v1/assistant/chat", { body: { merchantId, messages }, signal }),
 };
+
+// ── AI Assistant (Functional 10) ─────────────────────────────────────────────
+export interface ChatTurn { role: "user" | "assistant"; content: string; }
+/** A source card / action chip: server resolves an allowlisted key → deep-link. */
+export interface ChatLink { key: string; label: string; route: string; }
+export interface ChatResponse {
+  kind: "answer" | "refusal";
+  reply: string;
+  sources: ChatLink[];
+  actions: ChatLink[];
+  mode: "ai" | "fallback";
+  model: string | null;
+  businessDate: string;
+}

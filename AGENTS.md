@@ -5,13 +5,17 @@ household businesses. Functional 01: onboarding that creates the store's
 operating profile. Functional 02: the "Trang Hôm nay" (Today) dashboard —
 read-only daily revenue/attention view. Functional 03: "Tạo bill & thanh toán" —
 the POS golden flow (chọn hàng → giỏ → cash/QR → biên nhận), returns/refunds and
-inventory. Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under
-RLS; **F3 money/inventory mutations go through the combined Node server**, which
-also hosts the pre-existing PayOS API. Specs:
+inventory. Functional 10: "Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat
+assistant over the merchant's own data. Vite + React + TS SPA. F1/F2 reads talk
+**directly to Supabase** under RLS; **F3 money/inventory mutations and the F10
+assistant go through the combined Node server**, which also hosts the pre-existing
+PayOS API. Specs:
 `/home/nguye/firstmate/data/soho-onboarding-app/soho-functional-01.md`,
 `/home/nguye/firstmate/data/soho-today-dashboard/soho-functional-02.md`,
 `/home/nguye/firstmate/data/soho-pos-qr/soho-functional-02-03.md` (F03 section
-starts at "ĐẶC TẢ FUNCTIONAL 03").
+starts at "ĐẶC TẢ FUNCTIONAL 03"),
+`/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
+`amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy).
 
 ## Commands
 - `npm run dev` — Vite dev server.
@@ -50,6 +54,17 @@ starts at "ĐẶC TẢ FUNCTIONAL 03").
   cart, unit-tested), `src/orders/` (bill list + detail + return flow), `src/inventory/`. All F3 server
   calls go through `src/lib/api.ts` (typed, attaches the Supabase bearer, maps the spec-11.1 error
   contract to `ApiError.code`). QR payload rendered with the `qrcode` dep.
+- **Functional 10 AI Assistant (`server/assistant/` + `src/assistant/`):** "Trợ lý SoHo"
+  chat. Server route `POST /v1/assistant/chat` (registered in `server/f3/router.js`, reuses F3
+  `verifyUser`+`requireMembership` — any ACTIVE member; membership is the tenant guard). Flow in
+  `index.js`: `facts.js` builds a merchant-scoped FACTS pack via **direct SQL over the pooler**
+  (mirrors the F2 window math — do NOT call `get_today_dashboard` from the pooler, it FORBIDs) →
+  `prompt.js` system instruction → `gemini.js` (`gemini-flash-latest`, structured JSON, 6s timeout,
+  one retry) → post-check: forbidden terms + `numbers.js` grounding (every digit-run in the reply
+  must appear in the FACTS text) → on any failure/AI-off, `fallback.js` deterministic answerer
+  (grounded by construction). `registry.js` = allowlisted source-card / "Làm tiếp" deep-link keys
+  (model emits keys, server resolves label+route). Pure logic unit-tested in `test/assistant-*.test.js`;
+  4th bottom-nav tab `/tro-ly`. GEMINI_API_KEY is server-only `.env`.
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -96,6 +111,11 @@ starts at "ĐẶC TẢ FUNCTIONAL 03").
   whole spec 13.3 matrix (SALE/INV/QR/RET/RLS) against the real DB + PayOS on its own throwaway merchant
   (`soho-crew-test+f3@soho.test`). It is NOT in `npm test` (not a `*.test.js`); `npm test` must run
   WITHOUT `DATABASE_URL` in the env or the PayOS-forward server test fails.
+- **F10 live E2E:** `AI_BASE=http://localhost:<port> node --env-file=.env test/assistant-e2e.mjs`
+  (server running with `.env`) covers grounding, source cards, honest out-of-data, cross-tenant 403,
+  and the Gemini-down fallback (spawns a 2nd server with an invalid key) on `soho-crew-test+ai@soho.test`.
+  `.env` needs `GEMINI_API_KEY` (server-only, never committed). When two lanes share the box, pick a
+  non-3000 `PORT` to avoid the parallel lane's server.
 
 ## Maintaining this file
 

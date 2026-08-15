@@ -209,6 +209,22 @@ export const IconSparkle = (p: P) => (
     <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
   </Svg>
 );
+export const IconRobot = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <circle cx="9.5" cy="14" r="1.3" />
+    <circle cx="14.5" cy="14" r="1.3" />
+    <path d="M12 4.5v3.5" />
+    <circle cx="12" cy="3.5" r="1.2" />
+    <path d="M2 12.5v3M22 12.5v3" />
+  </Svg>
+);
+export const IconSend = (p: P) => (
+  <Svg {...p}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </Svg>
+);
 export const IconEdit = (p: P) => (
   <Svg {...p}>
     <path d="M12 20h9" />

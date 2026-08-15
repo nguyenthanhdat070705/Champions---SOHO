@@ -1,10 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { IconHome, IconQR, IconSettings } from "../components/icons";
+import { IconHome, IconQR, IconSettings, IconRobot } from "../components/icons";
 
 export function BottomNav() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const isHome = pathname === "/";
+  const isAssistant = pathname === "/tro-ly";
   const isSettings = pathname === "/cai-dat";
 
   return (
@@ -15,6 +16,14 @@ export function BottomNav() {
       >
         <IconHome size={22} />
         <span>Trang chủ</span>
+      </button>
+
+      <button
+        className={`bottomnav__item ${isAssistant ? "bottomnav__item--on" : ""}`}
+        onClick={() => nav("/tro-ly")}
+      >
+        <IconRobot size={22} />
+        <span>Trợ lý</span>
       </button>
 
       <div className="bottomnav__center">
