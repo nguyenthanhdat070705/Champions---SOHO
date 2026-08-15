@@ -229,7 +229,7 @@ export async function insertProductTx(client, {
     await client.query(
       `insert into public.inventory_levels (merchant_id, product_id, on_hand, low_stock_threshold)
        values ($1,$2,$3,$4)
-       on conflict (merchant_id, product_id) do update set on_hand=excluded.on_hand, updated_at=now()`,
+       on conflict (merchant_id, product_id) do update set on_hand=excluded.on_hand, row_version=public.inventory_levels.row_version+1, updated_at=now()`,
       [merchantId, productId, opening, lowStockThreshold ?? 0],
     );
     if (opening > 0) {

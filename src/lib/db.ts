@@ -210,6 +210,20 @@ export async function loadMyMerchant(userId: string): Promise<MerchantRow | null
   return merchant ?? null;
 }
 
+/** The current user's role in a merchant ('owner'|'manager'|'cashier'), for UI gating. */
+export async function loadMyRole(userId: string, merchantId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("merchant_members")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("merchant_id", merchantId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { role: string } | null)?.role ?? null;
+}
+
 export async function loadTaxProfile(merchantId: string): Promise<TaxRow | null> {
   const { data, error } = await supabase
     .from("merchant_tax_profiles")

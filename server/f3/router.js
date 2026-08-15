@@ -22,6 +22,12 @@ import {
 } from "./payments.js";
 import { returnsPreview, createReturn, confirmRefund, listReturns } from "./returns.js";
 import { renderReceiptHtml } from "./receipts.js";
+import { getInventoryOverview, getProductLedger, getReconciliation } from "../f5/inventory.js";
+import { previewAdjustment, postAdjustment, reverseMovement } from "../f5/adjustments.js";
+import {
+  createCountSession, getCountSession, saveCountItems, reviewCount, postCount,
+  cancelCountSession, listCountSessions,
+} from "../f5/counts.js";
 import { assistantChat } from "../assistant/index.js";
 import { query } from "../db/pool.js";
 
@@ -204,6 +210,107 @@ const ROUTES = [
     const body = await readBody(c.req);
     const result = await renameCategory(merchantId, userId, categoryId, body.name);
     sendJson(c.res, 200, result);
+  }],
+
+  // ── Functional 05: inventory ledger + adjustments ─────────────────────────
+  // NB: more specific paths (reconciliation, adjustments, movements, counts) are
+  // listed BEFORE the /inventory/:productId catch so they win the match.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/inventory$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    const result = await getInventoryOverview(merchantId, {
+      search: sp.get("search") || undefined, filter: sp.get("filter") || undefined,
+      limit: sp.get("limit") || undefined, offset: sp.get("offset") || undefined,
+    });
+    sendJson(c.res, 200, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/inventory\/reconciliation$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, ["owner"]);
+    sendJson(c.res, 200, await getReconciliation(merchantId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory\/adjustments\/preview$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await previewAdjustment(merchantId, body));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory\/adjustments$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await postAdjustment(merchantId, userId, role, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory\/movements\/([^/]+)\/reverse$/, async (c) => {
+    const [merchantId, movementId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await reverseMovement(merchantId, userId, role, movementId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/inventory\/([^/]+)$/, async (c) => {
+    const [merchantId, productId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await getProductLedger(merchantId, productId, {
+      limit: sp.get("limit") || undefined, before: sp.get("before") || undefined,
+    }));
+  }],
+
+  // ── Functional 05: stock counts (kiểm kê) ─────────────────────────────────
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory-counts$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createCountSession(merchantId, userId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/inventory-counts$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listCountSessions(merchantId, { limit: c.url.searchParams.get("limit") || undefined }));
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/inventory-counts\/([^/]+)\/items$/, async (c) => {
+    const [merchantId, sessionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await saveCountItems(merchantId, userId, sessionId, body));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory-counts\/([^/]+)\/review$/, async (c) => {
+    const [merchantId, sessionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await reviewCount(merchantId, userId, sessionId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory-counts\/([^/]+)\/post$/, async (c) => {
+    const [merchantId, sessionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await postCount(merchantId, userId, role, sessionId, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/inventory-counts\/([^/]+)\/cancel$/, async (c) => {
+    const [merchantId, sessionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await cancelCountSession(merchantId, userId, sessionId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/inventory-counts\/([^/]+)$/, async (c) => {
+    const [merchantId, sessionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getCountSession(merchantId, sessionId));
   }],
 
   // ── Preview / draft ──────────────────────────────────────────────────────

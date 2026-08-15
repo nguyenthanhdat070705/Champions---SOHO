@@ -353,8 +353,8 @@ function LowStockSection({ products }: { products: LowStockProduct[] }) {
         <div className="section-title" style={{ margin: "22px 2px 12px" }}>
           Tồn kho thấp
         </div>
-        <button className="section-head__all" onClick={() => nav("/kho")}>
-          Vào kho
+        <button className="section-head__all" onClick={() => nav("/ton-kho?filter=low")}>
+          Xem tồn kho
         </button>
       </div>
       <div className="attn">
@@ -362,7 +362,7 @@ function LowStockSection({ products }: { products: LowStockProduct[] }) {
           <button
             key={p.productId}
             className="attn__row"
-            onClick={() => nav("/kho")}
+            onClick={() => nav(`/ton-kho/${p.productId}`)}
           >
             <span className="attn__dot attn__dot--p3">
               <IconBox size={15} />

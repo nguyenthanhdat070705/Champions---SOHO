@@ -79,7 +79,12 @@ export function CatalogPage() {
 
   return (
     <div className="screen screen--tabbed">
-      <PageHeader title="Hàng hóa & dịch vụ" onBack={() => nav("/")} />
+      <PageHeader title="Hàng hóa & dịch vụ" onBack={() => nav("/")}
+        right={
+          <button className="step__back" aria-label="Tồn kho" onClick={() => nav("/ton-kho")}>
+            <IconBox size={19} />
+          </button>
+        } />
       <div className="content--plain catalog">
         <div className="pos-search" style={{ padding: 0, marginBottom: 10 }}>
           <div className="pos-search__box">
@@ -117,7 +122,9 @@ export function CatalogPage() {
         )}
 
         {lowCount > 0 && statusTab === "active" && (
-          <div className="banner banner--warn" style={{ marginTop: 12 }}>{lowCount} sản phẩm ở mức tồn kho thấp.</div>
+          <button className="banner banner--warn banner--tap" style={{ marginTop: 12 }} onClick={() => nav("/ton-kho?filter=low")}>
+            {lowCount} sản phẩm ở mức tồn kho thấp. <span className="banner__cta">Xem tồn kho ›</span>
+          </button>
         )}
 
         {loading ? (

@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { getSession } from "../lib/auth";
 import {
   loadMyMerchant,
+  loadMyRole,
   loadPaymentConnection,
   loadTaxProfile,
 } from "../lib/db";
@@ -21,6 +22,8 @@ interface MerchantState {
   tax: TaxRow | null;
   payment: PaymentRow | null;
   email: string;
+  /** Caller's role in the merchant; drives UI gating (server still enforces). */
+  role: string | null;
   refresh: () => Promise<void>;
 }
 
@@ -33,6 +36,7 @@ export function MerchantProvider({ children }: { children: ReactNode }) {
   const [tax, setTax] = useState<TaxRow | null>(null);
   const [payment, setPayment] = useState<PaymentRow | null>(null);
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -40,18 +44,21 @@ export function MerchantProvider({ children }: { children: ReactNode }) {
       const session = await getSession();
       if (!session) {
         setMerchant(null);
+        setRole(null);
         return;
       }
       setEmail(session.user.email ?? "");
       const m = await loadMyMerchant(session.user.id);
       setMerchant(m);
       if (m) {
-        const [t, p] = await Promise.all([
+        const [t, p, r] = await Promise.all([
           loadTaxProfile(m.id),
           loadPaymentConnection(m.id),
+          loadMyRole(session.user.id, m.id),
         ]);
         setTax(t);
         setPayment(p);
+        setRole(r);
       }
     } catch (e) {
       setError((e as Error).message || "Không tải được dữ liệu cửa hàng.");
@@ -66,7 +73,7 @@ export function MerchantProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ loading, error, merchant, tax, payment, email, refresh }}
+      value={{ loading, error, merchant, tax, payment, email, role, refresh }}
     >
       {children}
     </Ctx.Provider>

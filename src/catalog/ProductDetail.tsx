@@ -136,6 +136,11 @@ export function ProductDetail() {
             {p.trackInventory && <div className="kv"><span>Mức tồn thấp</span><b>{p.lowStockThreshold != null ? fmtQty(p.lowStockThreshold) : "—"}</b></div>}
             {p.trackInventory && <div className="kv"><span>Cho bán âm</span><b>{p.negativeStockPolicy === "allow_owner" ? "Có" : "Không"}</b></div>}
             <div className="kv"><span>Cho phép giảm giá</span><b>{p.allowDiscount ? "Có" : "Không"}</b></div>
+            {p.trackInventory && (
+              <button className="btn btn--outline" style={{ marginTop: 6 }} onClick={() => nav(`/ton-kho/${id}`)}>
+                <IconBox size={16} /> Xem sổ tồn kho
+              </button>
+            )}
           </div>
         ) : (
           <div className="stack">

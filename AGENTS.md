@@ -7,9 +7,11 @@ read-only daily revenue/attention view. Functional 03: "Tạo bill & thanh toán
 the POS golden flow (chọn hàng → giỏ → cash/QR → biên nhận), returns/refunds and
 inventory. Functional 04: "Hàng hóa & dịch vụ" — full product catalog management
 (searchable list, create/edit goods|service, categories, archive/deactivate, price
-history, AI label-photo → draft). Functional 10: "Trợ lý SoHo" — a Vietnamese,
-grounded, read-only AI chat assistant over the merchant's own data. Vite + React +
-TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4
+history, AI label-photo → draft). Functional 05: "Tồn kho cơ bản" — the reliable inventory
+ledger: on-hand/available views, manual adjustments (reason + optimistic version), movement
+reversal, and stock counts (kiểm kê) with blind counting + atomic variance posting. Functional 10:
+"Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat assistant over the merchant's own data.
+Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
 server**, which also hosts the pre-existing PayOS API. Specs:
 `/home/nguye/firstmate/data/soho-onboarding-app/soho-functional-01.md`,
@@ -17,6 +19,7 @@ server**, which also hosts the pre-existing PayOS API. Specs:
 `/home/nguye/firstmate/data/soho-pos-qr/soho-functional-02-03.md` (F03 section
 starts at "ĐẶC TẢ FUNCTIONAL 03"),
 `/home/nguye/firstmate/data/soho-f4-catalog/soho-functional-04.md`,
+`/home/nguye/firstmate/data/soho-f5-inventory/soho-functional-05.md`,
 `/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
 `amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy).
 
@@ -82,7 +85,30 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   search + status/type/category chips + FAB), `ProductForm.tsx` (create/edit + AI photo review sheet),
   `ProductDetail.tsx` (info + history timeline + status actions), `parts.tsx` (category/type sheets,
   confidence badge). Pure client helpers + validation in `src/lib/catalog.ts` (unit-tested, mirrors
-  `text.js`). `src/inventory/` was removed (Kho became the catalog).
+  `text.js`). `src/inventory/` was removed at F04 and **re-added for F05** (see below).
+- **Functional 05 server (`server/f5/`, reuses F3 auth/pool/audit/errors):** `movements.js` is the
+  shared post-movement core — `postMovementTx` (lock level FOR UPDATE → block negative → append
+  immutable movement + `balance_after` → bump `inventory_levels.row_version` → idempotent on the
+  `(product_id, movement_type, reference_type, reference_id)` unique index) + `deterministicUuid`
+  (Idempotency-Key → durable movement `reference_id`). `inventory.js` = overview/ledger/reconciliation
+  reads (ledger resolves each movement's source to a bill/return/count deep-link). `adjustments.js` =
+  preview + `postAdjustment` (409 `INVENTORY_BALANCE_CHANGED` on stale level `row_version`) +
+  `reverseMovement` (appends `reversal` linked via `original_movement_id`; the unique index blocks a
+  second reverse → 409 `MOVEMENT_ALREADY_REVERSED`; same idem-key replays via `source_line_id` marker).
+  `counts.js` = session create (snapshot `expected_at_start`, blind default ON) / save / review /
+  atomic `postCount` (count_adjustment per line, lock ordering by product_id) / cancel. Pure logic
+  unit-tested in `test/f5-inventory.test.js`: `count-math.js` (variance, `countPostDelta` =
+  adjustment_to_counted_at_post), `reasons.js` (fixed reason list, OTHER needs a note), `rules.js`
+  (reversible types + deltas). Routes wired into `server/f3/router.js` under
+  `/v1/merchants/:mid/{inventory,inventory/:productId,inventory/reconciliation,inventory/adjustments*,
+  inventory/movements/:id/reverse,inventory-counts*}`.
+- **Functional 05 client (`src/inventory/`):** `InventoryPage.tsx` (route `/ton-kho`, overview +
+  Thấp/Hết/Âm filters + adjust FAB), `InventoryLedger.tsx` (`/ton-kho/:productId` — big on-hand,
+  timeline, reverse), `CountCreate.tsx` + `CountSession.tsx` (counting→review→post) + `CountList.tsx`
+  (`/ton-kho/kiem-kho*`), `Reconciliation.tsx` (`/ton-kho/doi-chieu`, owner), `parts.tsx` (state badge +
+  the two-step `AdjustSheet`). Pure helpers mirror the server in `src/lib/inventory.ts` (unit-tested).
+  All calls go through `src/lib/api.ts`. `MerchantContext` now exposes `role` (via `loadMyRole`) for UI
+  gating — owner/manager adjust/count/reverse; cashier is view-only (server enforces the same).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -148,10 +174,35 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   covers all same-origin GETs, so any API path it doesn't exclude gets served stale (broke F04
   read-after-write; the `/v1/` exclusion + `soho-shell-v2` bump fix it). Never add an API path the SW
   will cache.
-- **F4 live E2E:** `node --env-file=.env test/f4-e2e.mjs` (server running) runs the spec 12.3 P0 matrix
-  (PRD-01..08,12,15 + search/categories) on its own throwaway merchant. `test/f4-setup.mjs`
-  (`ensureF4Merchant`) idempotently creates the `soho-crew-test+f4@soho.test` account + a test merchant
-  (never a real one). Not in `npm test` (`.mjs`, needs DB).
+- **F5 schema quirks (deployed, don't re-derive):** table is `inventory_levels` (cols `on_hand`,
+  `reserved_qty`, `low_stock_threshold`, `row_version`; **no location_id** — single-location MVP),
+  movement cols are `reference_type/reference_id` + `created_by/created_at` (NOT source_/posted_).
+  `inventory_movements` has a **`balance_after >= 0` CHECK** (DB-level negative-stock backstop) and a
+  unique `(product_id, movement_type, reference_type, reference_id)` (idempotency + double-reversal
+  guard). Enum `inventory_movement_type` = sale/sale_return/damage_writeoff/manual_adjustment/opening/
+  count_adjustment/reversal/purchase_receipt. `inventory_count_items` has **no `variance_qty`** (server
+  computes it) and **`inventory_reconciliation_findings` does NOT exist** → reconciliation is computed
+  live (spec 9.4 query), display-only, never auto-fixed. There are NO DB functions — all F5 txns run in
+  Node via the pooler (F3/F4 pattern).
+- **F5 negative stock is BLOCKED** (founder decision, no owner-override UI): adjustments/counts that
+  would drive `on_hand < 0` → 409 `INSUFFICIENT_STOCK` (the `balance_after >= 0` CHECK is the backstop).
+- **F5 made `inventory_levels.row_version` a real optimistic-lock counter** — F3 sale/return posting and
+  F4 opening upsert now bump it too (nothing reads it besides F5's adjustment version check; safe).
+  The adjustment preview returns the level `row_version`; a stale one at post → 409
+  `INVENTORY_BALANCE_CHANGED` + current snapshot.
+- **F5 count posting = adjustment_to_counted_at_post** (spec 4.3): post delta = counted − CURRENT
+  on_hand (locked), so a sale during the count is absorbed; review shows both `expected_at_start` and
+  `current_before_post`. A blank/`MISSING` line is never treated as 0 (no movement). Only manager/owner
+  may adjust/count/reverse (server-enforced; cashier view-only).
+- **F5 live E2E:** `F5_BASE=http://localhost:<port> node --env-file=.env test/f5-e2e.mjs` (server
+  running with `.env` + a non-3000 `PORT`) runs the spec 12.3 P0 matrix (INV-01/02/03, adjustment
+  idempotency + version-conflict + negative-block, reversal + double-reversal, count blind/review/atomic-
+  post/blank≠0, RLS, reconciliation-clean) on `soho-crew-test+f5@soho.test` (`test/f5-setup.mjs`
+  `ensureF5Merchant`, never a real merchant). Not in `npm test` (`.mjs`, needs DB).
+- **F5 screens with a `.form-foot` bottom CTA must be `immersive` in `AppShell.tsx`** (bottom-nav
+  hidden) or the fixed footer overlaps the tab bar and taps mis-fire — `/ton-kho/:productId`,
+  `/ton-kho/kiem-kho/*` are immersive; the FAB/list screens (`/ton-kho`, `/ton-kho/kiem-kho`,
+  `/ton-kho/doi-chieu`) keep the nav.
 
 ## Maintaining this file
 

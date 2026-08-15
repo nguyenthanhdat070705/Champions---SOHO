@@ -206,6 +206,45 @@ export const api = {
   confirmRefund: (refundId: string, reference?: string) =>
     request<{ refundId: string; status: string; orderId: string }>("POST", `/v1/refunds/${refundId}/confirm`, { body: { reference } }),
   receiptUrl: (orderId: string) => `/v1/orders/${orderId}/receipt`,
+  // ── Functional 05 inventory ────────────────────────────────────────────────
+  inventoryList: (merchantId: string, params: { search?: string; filter?: InventoryFilter; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set("search", params.search);
+    if (params.filter && params.filter !== "all") qs.set("filter", params.filter);
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return request<InventoryOverview>("GET", `/v1/merchants/${merchantId}/inventory${q ? "?" + q : ""}`);
+  },
+  inventoryLedger: (merchantId: string, productId: string, params: { limit?: number; before?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.before) qs.set("before", params.before);
+    const q = qs.toString();
+    return request<LedgerResult>("GET", `/v1/merchants/${merchantId}/inventory/${productId}${q ? "?" + q : ""}`);
+  },
+  inventoryReconciliation: (merchantId: string) =>
+    request<{ findings: ReconFinding[] }>("GET", `/v1/merchants/${merchantId}/inventory/reconciliation`),
+  adjustPreview: (merchantId: string, body: AdjustInput) =>
+    request<AdjustPreview>("POST", `/v1/merchants/${merchantId}/inventory/adjustments/preview`, { body }),
+  adjustPost: (merchantId: string, body: AdjustInput & { expectedBalanceVersion?: number }, idempotencyKey: string) =>
+    request<AdjustResult>("POST", `/v1/merchants/${merchantId}/inventory/adjustments`, { body, idempotencyKey }),
+  reverseMovement: (merchantId: string, movementId: string, body: { reasonCode?: string; note?: string }, idempotencyKey: string) =>
+    request<ReversalResult>("POST", `/v1/merchants/${merchantId}/inventory/movements/${movementId}/reverse`, { body, idempotencyKey }),
+  countCreate: (merchantId: string, body: { name?: string; blindCount?: boolean; scope: CountScope; businessDate?: string }, idempotencyKey: string) =>
+    request<{ session: CountSessionSummary; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/inventory-counts`, { body, idempotencyKey }),
+  countList: (merchantId: string) =>
+    request<{ sessions: CountSessionSummary[] }>("GET", `/v1/merchants/${merchantId}/inventory-counts`),
+  countGet: (merchantId: string, sessionId: string) =>
+    request<CountSessionView>("GET", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}`),
+  countSaveItems: (merchantId: string, sessionId: string, body: { items: CountItemInput[]; expectedRowVersion?: number }) =>
+    request<CountSessionView>("PATCH", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}/items`, { body }),
+  countReview: (merchantId: string, sessionId: string) =>
+    request<CountSessionView>("POST", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}/review`, { body: {} }),
+  countPost: (merchantId: string, sessionId: string, idempotencyKey: string) =>
+    request<CountPostResult>("POST", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}/post`, { body: {}, idempotencyKey }),
+  countCancel: (merchantId: string, sessionId: string) =>
+    request<{ sessionId: string; status: string }>("POST", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}/cancel`, { body: {} }),
   chat: (merchantId: string, messages: ChatTurn[], signal?: AbortSignal) =>
     request<ChatResponse>("POST", "/v1/assistant/chat", { body: { merchantId, messages }, signal }),
 };
@@ -222,4 +261,70 @@ export interface ChatResponse {
   mode: "ai" | "fallback";
   model: string | null;
   businessDate: string;
+}
+
+// ── Functional 05 inventory ──────────────────────────────────────────────────
+export type InventoryFilter = "all" | "low" | "zero" | "negative";
+export type StockState = "ok" | "low" | "zero" | "negative";
+export interface InventoryLevel {
+  productId: string; name: string; sku: string | null; unitCode: string;
+  onHand: number; reserved: number; available: number;
+  lowStockThreshold: number; rowVersion: number; state: StockState;
+}
+export interface InventoryOverview {
+  products: InventoryLevel[]; hasMore: boolean; nextOffset: number | null;
+  summary: { total: number; negative: number; zero: number; low: number };
+}
+export interface MovementSource { kind: string; label: string | null; route: string | null; }
+export interface MovementEntry {
+  id: string; movementType: string; quantityDelta: number; balanceAfter: number;
+  reasonCode: string | null; note: string | null; createdAt: string;
+  actorName: string | null; originalMovementId: string | null; reversed: boolean;
+  source: MovementSource | null;
+}
+export interface LedgerProduct {
+  productId: string; name: string; sku: string | null; unitCode: string;
+  onHand: number; reserved: number; available: number; lowStockThreshold: number;
+  rowVersion: number; negativeStockPolicy: string; state: StockState;
+}
+export interface LedgerResult {
+  product: LedgerProduct; movements: MovementEntry[]; hasMore: boolean; nextCursor: string | null;
+  reconciliation: { ledgerQty: number; balanceQty: number; mismatch: boolean };
+}
+export interface ReconFinding { productId: string; name: string; unitCode: string; balanceQty: number; ledgerQty: number; diff: number; }
+export interface AdjustInput { productId: string; direction: "increase" | "decrease"; quantity: number; reasonCode?: string; note?: string; }
+export interface AdjustPreview {
+  productId: string; name: string; unitCode: string; direction: "increase" | "decrease";
+  quantity: number; delta: number; before: number; after: number;
+  reasonCode: string | null; note: string | null; currentVersion: number; wouldBlock: boolean;
+}
+export interface AdjustResult {
+  movementId: string; productId: string; name: string; direction: string; quantity: number;
+  delta: number; previousBalance: number; balanceAfter: number; rowVersion: number;
+  reasonCode: string | null; note: string | null; replayed: boolean;
+}
+export interface ReversalResult {
+  movementId: string; originalMovementId: string; productId: string; delta: number;
+  previousBalance?: number; balanceAfter: number; rowVersion?: number; replayed: boolean;
+}
+export type CountScope = { type: "all" } | { type: "category"; categoryId: string } | { type: "products"; productIds: string[] };
+export interface CountSessionSummary {
+  id: string; name: string; status: "draft" | "counting" | "review" | "posted" | "cancelled";
+  blindCount: boolean; startedAt: string | null; postedAt: string | null; itemCount: number;
+  scope?: CountScope; rowVersion?: number;
+}
+export interface CountItem {
+  productId: string; name: string; unitCode: string; countedQty: number | null;
+  reasonCode: string | null; note: string | null;
+  expectedAtStart?: number; currentOnHand?: number; variance?: number | null;
+  deltaFromExpected?: number | null; requiresReason?: boolean; missing?: boolean;
+}
+export interface CountItemInput { productId: string; countedQty?: number | null; reasonCode?: string | null; note?: string | null; missing?: boolean; }
+export interface CountSessionView {
+  session: CountSessionSummary; items: CountItem[];
+  summary?: { increases: number; decreases: number; unchanged: number; missing: number; counted: number; needsReason: number };
+}
+export interface CountPostResult {
+  sessionId: string; status: string; postedLines: number; replayed?: boolean;
+  adjustments: { productId: string; delta: number; before: number; after: number; reasonCode: string }[];
 }

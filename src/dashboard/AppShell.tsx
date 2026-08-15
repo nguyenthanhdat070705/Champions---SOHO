@@ -13,7 +13,14 @@ export function AppShell() {
     /^\/don-hang\/[^/]+$/.test(pathname) ||
     // Catalog detail / create / edit carry their own bottom CTA (spec F04 3.7/3.8);
     // the list at /kho keeps the tab bar (its FAB clears the nav).
-    /^\/kho\/.+/.test(pathname);
+    /^\/kho\/.+/.test(pathname) ||
+    // Inventory (F05): the ledger, count create + count session carry their own
+    // bottom CTA, so hide the tab bar to avoid overlap. The overview (/ton-kho),
+    // count list (/ton-kho/kiem-kho) and reconciliation use a FAB/list → keep nav.
+    /^\/ton-kho\/kiem-kho\/.+/.test(pathname) ||
+    (/^\/ton-kho\/[^/]+$/.test(pathname) &&
+      pathname !== "/ton-kho/kiem-kho" &&
+      pathname !== "/ton-kho/doi-chieu");
   return (
     <>
       <Outlet />

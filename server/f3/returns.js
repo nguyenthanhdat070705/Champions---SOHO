@@ -160,7 +160,7 @@ async function applyReturnInventory(client, merchantId, lines, returnId, userId)
       }
     }
     await client.query(
-      `update public.inventory_levels set on_hand=$1, updated_at=now() where merchant_id=$2 and product_id=$3`,
+      `update public.inventory_levels set on_hand=$1, row_version=row_version+1, updated_at=now() where merchant_id=$2 and product_id=$3`,
       [balance, merchantId, pid],
     );
   }

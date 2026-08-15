@@ -2107,3 +2107,70 @@ select.input {
 .tl-row__dot { width: 9px; height: 9px; flex: 0 0 9px; margin-top: 6px; border-radius: 50%; background: var(--teal); }
 .tl-row__body { min-width: 0; flex: 1; }
 .tl-row__t { font-weight: 700; color: var(--ink); font-size: 14px; }
+
+/* ── Functional 05: Tồn kho / kiểm kê ─────────────────────────────────────── */
+.pill--low { background: var(--amber-050); color: var(--amber); }
+.pill--out { background: var(--danger-050); color: var(--danger); }
+.inv-row__qty--out { color: var(--danger); }
+
+.inv-actions { display: flex; gap: 10px; margin-top: 12px; }
+.inv-actions .btn { flex: 1; min-height: 44px; }
+
+.banner--tap { display: flex; width: 100%; align-items: center; gap: 8px; text-align: left; cursor: pointer; justify-content: space-between; }
+.banner__cta { font-weight: 800; white-space: nowrap; }
+
+/* Adjust sheet */
+.inv-adjust__head { padding: 2px 2px 8px; }
+.inv-adjust__name { font-weight: 800; font-size: 16px; color: var(--ink); }
+.inv-adjust__ba { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px; }
+.inv-adjust__ba-col { text-align: center; flex: 1; }
+.inv-adjust__ba-num { font-size: 26px; font-weight: 800; color: var(--ink); }
+.inv-adjust__ba-num--bad { color: var(--danger); }
+.inv-adjust__ba-arrow { font-weight: 800; color: var(--teal-700); font-size: 14px; white-space: nowrap; }
+
+/* Ledger header big numbers */
+.inv-big { display: flex; align-items: flex-end; gap: 20px; margin: 10px 0 6px; }
+.inv-big__num { font-size: 34px; font-weight: 800; color: var(--ink); line-height: 1; }
+.inv-big__aside { padding-bottom: 2px; }
+.inv-big__sub { font-size: 22px; font-weight: 800; color: var(--teal-700); line-height: 1; }
+
+/* Movement rows */
+.mv-row { display: flex; gap: 12px; align-items: flex-start; }
+.mv-row__delta { flex: 0 0 auto; min-width: 44px; text-align: center; font-weight: 800; font-size: 15px; padding: 4px 8px; border-radius: var(--r-sm); }
+.mv-row__delta--up { background: var(--teal-050); color: var(--teal-700); }
+.mv-row__delta--down { background: var(--danger-050); color: var(--danger); }
+.mv-row__body { flex: 1; min-width: 0; }
+.mv-row__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mv-row__type { font-weight: 700; color: var(--ink); font-size: 14px; }
+.mv-row__acts { display: flex; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
+.mv-row__link { display: inline-flex; align-items: center; gap: 2px; color: var(--teal-700); font-weight: 700; font-size: 13px; }
+.mv-row__link--danger { color: var(--danger); }
+
+/* Toggle switch */
+.switch { flex: 0 0 46px; width: 46px; height: 28px; border-radius: 999px; background: var(--line); position: relative; transition: background .15s; }
+.switch--on { background: var(--teal); }
+.switch__dot { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .15s; }
+.switch--on .switch__dot { transform: translateX(18px); }
+
+/* Count entry rows */
+.inv-row--picked { outline: 2px solid var(--teal); }
+.count-row { display: flex; flex-direction: column; gap: 8px; }
+.count-row--missing { opacity: .7; }
+.count-row__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.count-row__entry { display: flex; align-items: center; gap: 8px; }
+.count-row__input { flex: 1; text-align: center; font-size: 18px; font-weight: 700; }
+
+.count-summary { display: flex; justify-content: space-around; text-align: center; padding: 14px; }
+.count-summary > div { display: flex; flex-direction: column; gap: 2px; }
+.count-summary b { font-size: 20px; font-weight: 800; }
+.up { color: var(--teal-700); }
+.down { color: var(--danger); }
+
+.count-review { display: flex; flex-direction: column; }
+.count-review__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.count-review__delta { font-weight: 800; font-size: 16px; }
+.count-review__nums { margin-top: 4px; }
+
+.count-done { text-align: center; padding: 24px 16px; }
+.count-done__ic { width: 58px; height: 58px; border-radius: 50%; background: var(--teal); display: grid; place-items: center; margin: 0 auto 12px; }
+.count-done__t { font-size: 18px; font-weight: 800; color: var(--ink); margin-bottom: 4px; }

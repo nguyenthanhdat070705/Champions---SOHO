@@ -19,6 +19,12 @@ import { AssistantPage } from "./assistant/AssistantPage";
 import { CatalogPage } from "./catalog/CatalogPage";
 import { ProductForm } from "./catalog/ProductForm";
 import { ProductDetail } from "./catalog/ProductDetail";
+import { InventoryPage } from "./inventory/InventoryPage";
+import { InventoryLedger } from "./inventory/InventoryLedger";
+import { CountList } from "./inventory/CountList";
+import { CountCreate } from "./inventory/CountCreate";
+import { CountSession } from "./inventory/CountSession";
+import { Reconciliation } from "./inventory/Reconciliation";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -84,6 +90,12 @@ export default function App() {
             <Route path="/kho/moi" element={<ProductForm />} />
             <Route path="/kho/:id" element={<ProductDetail />} />
             <Route path="/kho/:id/sua" element={<ProductForm />} />
+            <Route path="/ton-kho" element={<InventoryPage />} />
+            <Route path="/ton-kho/doi-chieu" element={<Reconciliation />} />
+            <Route path="/ton-kho/kiem-kho" element={<CountList />} />
+            <Route path="/ton-kho/kiem-kho/moi" element={<CountCreate />} />
+            <Route path="/ton-kho/kiem-kho/:id" element={<CountSession />} />
+            <Route path="/ton-kho/:productId" element={<InventoryLedger />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />
