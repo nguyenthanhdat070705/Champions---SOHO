@@ -4,10 +4,15 @@
 // touching money/inventory (NFR-04); the client never supplies a trusted
 // user/merchant id. Errors are mapped to the spec 11.1 contract.
 import { DomainError, mapPgError } from "./errors.js";
-import { verifyUser, requireMembership, SELLING_ROLES } from "./auth.js";
+import { verifyUser, requireMembership, SELLING_ROLES, PRIVILEGED_ROLES } from "./auth.js";
 import { hasDatabase } from "../db/pool.js";
 import { devEndpointsEnabled } from "./env.js";
 import { listProducts, quickCreateProduct } from "./catalog.js";
+import {
+  createProduct, updateProduct, changeProductStatus, getProductDetail,
+  lookupByBarcode, listCategories, createCategory, renameCategory,
+} from "./products.js";
+import { aiProductPreview, aiConfirmSuggestion } from "./ai_products.js";
 import {
   preview, createOrder, updateOrder, lockOrder, unlockOrder, cancelOrder,
   getOrder, listOrders, getActiveDraft,
@@ -87,18 +92,35 @@ async function merchantOfRefund(refundId) {
 
 // Route table: [method, regex, handler]. Handler gets (ctx) with params + helpers.
 const ROUTES = [
-  // ── Catalog ────────────────────────────────────────────────────────────────
+  // ── Catalog: list / search (spec 3.1 / 10 GET /products) ─────────────────────
   ["GET", /^\/v1\/merchants\/([^/]+)\/products$/, async (c) => {
     const [merchantId] = c.params;
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId);
-    const items = await listProducts(merchantId, {
-      search: c.url.searchParams.get("search") || undefined,
-      categoryId: c.url.searchParams.get("category") || undefined,
-      barcode: c.url.searchParams.get("barcode") || undefined,
+    const sp = c.url.searchParams;
+    const result = await listProducts(merchantId, {
+      search: sp.get("search") || undefined,
+      categoryId: sp.get("category") || undefined,
+      barcode: sp.get("barcode") || undefined,
+      type: sp.get("type") || undefined,
+      status: sp.get("status") || undefined,
+      includeArchived: sp.get("includeArchived") === "1",
+      limit: sp.get("limit") || undefined,
+      offset: sp.get("offset") || undefined,
     });
-    sendJson(c.res, 200, { products: items });
+    // Back-compat: the POS reads `.products`; the catalog also reads hasMore/nextOffset.
+    sendJson(c.res, 200, result);
   }],
+  // ── Catalog: full create (spec 3.7 / 10 POST /products, Idempotency-Key) ──────
+  ["POST", /^\/v1\/merchants\/([^/]+)\/products$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createProduct(merchantId, userId, role, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  // ── POS quick-create (spec 3.4) — cashiers allowed per policy ─────────────────
   ["POST", /^\/v1\/merchants\/([^/]+)\/products\/quick$/, async (c) => {
     const [merchantId] = c.params;
     const { userId } = await verifyUser(c.req);
@@ -106,6 +128,82 @@ const ROUTES = [
     const body = await readBody(c.req);
     const result = await quickCreateProduct(merchantId, userId, body);
     sendJson(c.res, 201, result);
+  }],
+  // ── Barcode lookup (spec 3.3 GET /products/barcode/:code) ─────────────────────
+  ["GET", /^\/v1\/merchants\/([^/]+)\/products\/barcode\/([^/]+)$/, async (c) => {
+    const [merchantId, code] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const result = await lookupByBarcode(merchantId, code);
+    sendJson(c.res, 200, result);
+  }],
+  // ── AI shortcuts (spec 11) ────────────────────────────────────────────────────
+  ["POST", /^\/v1\/merchants\/([^/]+)\/products\/ai\/preview$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req);
+    const result = await aiProductPreview(merchantId, userId, body);
+    sendJson(c.res, 200, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/products\/ai\/([^/]+)\/confirm$/, async (c) => {
+    const [merchantId, suggestionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await aiConfirmSuggestion(merchantId, userId, suggestionId, body);
+    sendJson(c.res, 200, result);
+  }],
+  // ── Status change (spec 3.8 / 10 POST /products/:id/status) ───────────────────
+  ["POST", /^\/v1\/merchants\/([^/]+)\/products\/([^/]+)\/status$/, async (c) => {
+    const [merchantId, productId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await changeProductStatus(merchantId, userId, productId, body.action, { reason: body.reason, ifMatch: body.expectedVersion });
+    sendJson(c.res, 200, result);
+  }],
+  // ── Detail / edit (spec 3.8 GET|PATCH /products/:id) ──────────────────────────
+  ["GET", /^\/v1\/merchants\/([^/]+)\/products\/([^/]+)$/, async (c) => {
+    const [merchantId, productId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const result = await getProductDetail(merchantId, productId);
+    sendJson(c.res, 200, result);
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/products\/([^/]+)$/, async (c) => {
+    const [merchantId, productId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const ifMatchHeader = c.req.headers["if-match"];
+    const ifMatch = body.expectedVersion != null ? body.expectedVersion
+      : (ifMatchHeader != null ? Number(String(ifMatchHeader).replace(/"/g, "")) : null);
+    const result = await updateProduct(merchantId, userId, role, productId, body, ifMatch);
+    sendJson(c.res, 200, result);
+  }],
+  // ── Categories (spec 8.2 / 10) ────────────────────────────────────────────────
+  ["GET", /^\/v1\/merchants\/([^/]+)\/categories$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, { categories: await listCategories(merchantId) });
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/categories$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createCategory(merchantId, userId, body.name);
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/categories\/([^/]+)$/, async (c) => {
+    const [merchantId, categoryId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await renameCategory(merchantId, userId, categoryId, body.name);
+    sendJson(c.res, 200, result);
   }],
 
   // ── Preview / draft ──────────────────────────────────────────────────────

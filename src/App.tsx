@@ -15,8 +15,10 @@ import { QRScreen, ReportsPage } from "./dashboard/pages";
 import { SalesFlow } from "./sales/SalesFlow";
 import { OrdersPage } from "./orders/OrdersPage";
 import { OrderDetail } from "./orders/OrderDetail";
-import { InventoryPage } from "./inventory/InventoryPage";
 import { AssistantPage } from "./assistant/AssistantPage";
+import { CatalogPage } from "./catalog/CatalogPage";
+import { ProductForm } from "./catalog/ProductForm";
+import { ProductDetail } from "./catalog/ProductDetail";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -78,7 +80,10 @@ export default function App() {
             <Route path="/ban-hang" element={<SalesFlow />} />
             <Route path="/don-hang" element={<OrdersPage />} />
             <Route path="/don-hang/:id" element={<OrderDetail />} />
-            <Route path="/kho" element={<InventoryPage />} />
+            <Route path="/kho" element={<CatalogPage />} />
+            <Route path="/kho/moi" element={<ProductForm />} />
+            <Route path="/kho/:id" element={<ProductDetail />} />
+            <Route path="/kho/:id/sua" element={<ProductForm />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

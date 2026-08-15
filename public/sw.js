@@ -1,7 +1,7 @@
 // Minimal service worker: enough for install-to-home-screen + a fast app shell.
 // Network-first for navigations (so deploys/new content win), cache-first for
 // static assets already fetched. API and Supabase calls are never cached.
-const CACHE = "soho-shell-v1";
+const CACHE = "soho-shell-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -27,9 +27,12 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
-  // Never intercept API / cross-origin (Supabase, PayOS) requests.
+  // Never intercept API / cross-origin (Supabase, PayOS) requests. `/v1/` is the
+  // F3/F4 mutation+read API — caching it would serve stale catalog/order data
+  // after a create/edit (spec 10.4: invalidate immediately, never wait for TTL).
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.startsWith("/v1/")) return;
 
   // App navigations: network-first, fall back to cached shell when offline.
   if (request.mode === "navigate") {

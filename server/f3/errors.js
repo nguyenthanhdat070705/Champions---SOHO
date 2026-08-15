@@ -25,6 +25,13 @@ export const ERROR_STATUS = {
   DISCOUNT_NOT_ALLOWED: 403,
   QR_CONNECTION_UNAVAILABLE: 400,
   INVALID_CASH_AMOUNT: 400,
+  // Catalog (Functional 04, spec 5 / 10.1)
+  PRODUCT_NOT_FOUND: 404,
+  PRODUCT_SKU_CONFLICT: 409,
+  PRODUCT_BARCODE_CONFLICT: 409,
+  CATEGORY_NAME_CONFLICT: 409,
+  SERVICE_NO_INVENTORY: 422,
+  AI_PREVIEW_FAILED: 502,
   // Infra
   OFFLINE: 503,
   PROVIDER_ERROR: 502,
@@ -51,6 +58,12 @@ export const ERROR_MESSAGE = {
   DISCOUNT_NOT_ALLOWED: "Giảm giá vượt quyền hoặc vượt trần cho phép.",
   QR_CONNECTION_UNAVAILABLE: "Kết nối QR chưa sẵn sàng. Hãy chọn tiền mặt hoặc kiểm tra Cài đặt.",
   INVALID_CASH_AMOUNT: "Số tiền khách đưa chưa hợp lệ.",
+  PRODUCT_NOT_FOUND: "Không tìm thấy sản phẩm.",
+  PRODUCT_SKU_CONFLICT: "SKU này đang dùng cho sản phẩm khác.",
+  PRODUCT_BARCODE_CONFLICT: "Mã này đã thuộc một sản phẩm khác.",
+  CATEGORY_NAME_CONFLICT: "Tên nhóm hàng đã tồn tại.",
+  SERVICE_NO_INVENTORY: "Dịch vụ không theo dõi tồn kho.",
+  AI_PREVIEW_FAILED: "Chưa đọc được lúc này, bạn có thể nhập tay.",
   OFFLINE: "Không kết nối được máy chủ.",
   PROVIDER_ERROR: "Đối tác thanh toán tạm thời lỗi. Vui lòng thử lại.",
   INTERNAL: "Có lỗi xảy ra. Vui lòng thử lại.",
@@ -96,6 +109,21 @@ export function mapPgError(err) {
     if (/idempotency/.test(msg)) {
       return new DomainError("IDEMPOTENCY_PAYLOAD_MISMATCH");
     }
+    // Catalog uniqueness (spec 4.2 / 5). The explicit paths in products.js add
+    // existing_product_id; this is the router-level safety net.
+    if (/products_merchant_id_sku_key|products.*sku/.test(msg)) {
+      return new DomainError("PRODUCT_SKU_CONFLICT", undefined, { field: "sku", action: "OPEN_EXISTING_PRODUCT" });
+    }
+    if (/products_barcode_unique|products.*barcode/.test(msg)) {
+      return new DomainError("PRODUCT_BARCODE_CONFLICT", undefined, { field: "barcode", action: "OPEN_EXISTING_PRODUCT" });
+    }
+    if (/product_categories_merchant_id_name_key/.test(msg)) {
+      return new DomainError("CATEGORY_NAME_CONFLICT", undefined, { field: "name" });
+    }
+  }
+  // The service-can't-track-inventory guard is a 422 (spec 12.3 PRD-02).
+  if (err?.code === "23514" && /products_service_no_inventory/.test(msg)) {
+    return new DomainError("SERVICE_NO_INVENTORY", undefined, { field: "trackInventory" });
   }
   // Not-null / check violations surface as validation problems, not 500s.
   if (err?.code === "23514" || err?.code === "23502") {

@@ -10,7 +10,10 @@ export function AppShell() {
   const immersive =
     pathname === "/qr" ||
     pathname === "/ban-hang" ||
-    /^\/don-hang\/[^/]+$/.test(pathname);
+    /^\/don-hang\/[^/]+$/.test(pathname) ||
+    // Catalog detail / create / edit carry their own bottom CTA (spec F04 3.7/3.8);
+    // the list at /kho keeps the tab bar (its FAB clears the nav).
+    /^\/kho\/.+/.test(pathname);
   return (
     <>
       <Outlet />

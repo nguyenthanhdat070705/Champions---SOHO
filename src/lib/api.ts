@@ -83,6 +83,32 @@ export interface ApiProduct {
   id: string; name: string; sku: string | null; barcode: string | null;
   unitCode: string; salePrice: number; trackInventory: boolean; allowDiscount: boolean;
   isActive: boolean; categoryId: string | null; onHand: number | null; lowStockThreshold: number | null;
+  // Functional 04 additive fields (present from the catalog API; optional so older
+  // call sites keep compiling).
+  searchName?: string; productType?: "goods" | "service"; status?: "active" | "inactive" | "archived";
+  categoryName?: string | null; rowVersion?: number; negativeStockPolicy?: "block" | "allow_owner";
+  productLowStockThreshold?: number | null; effectiveLowStockThreshold?: number | null;
+}
+
+export interface CatalogListResult { products: ApiProduct[]; hasMore: boolean; nextOffset: number | null; }
+export interface Category { id: string; name: string; sortOrder?: number; activeCount?: number; }
+export interface ProductPriceHistoryEntry { priceVnd: number; effectiveFrom: string; changedBy: string; }
+export interface ProductAuditEntry { action: string; before: Record<string, unknown>; after: Record<string, unknown>; actorUserId: string | null; createdAt: string; }
+export interface ProductMovementEntry { movementType: string; quantityDelta: number; balanceAfter: number; reasonCode: string | null; createdAt: string; }
+export interface ProductDetailResult {
+  product: ApiProduct;
+  priceHistory: ProductPriceHistoryEntry[];
+  auditEvents: ProductAuditEntry[];
+  movements: ProductMovementEntry[];
+}
+export interface CategorySuggestion { categoryId: string | null; suggestedName: string | null; confidence: number; preselect: boolean; reason: string; }
+export interface AiDraftFields { displayName: string | null; productType: "goods" | "service"; unitCode: string | null; priceVnd: number | null; }
+export interface AiImageDraft {
+  suggestionId: string; draftId: string; inputKind: "image";
+  fields: AiDraftFields;
+  fieldConfidence: { displayName: number | null; unitCode: number | null; priceVnd: number | null };
+  warnings: string[];
+  category: CategorySuggestion;
 }
 export interface CartItemInput { productId?: string | null; quantity: number | string; name?: string; unitPrice?: number; unitCode?: string; note?: string | null; }
 export interface AdjustmentInput { scope: "line" | "order"; kind: "fixed" | "percent"; rate?: number; amount?: number; lineNo?: number; reasonCode?: string; note?: string; }
@@ -112,6 +138,41 @@ export const api = {
   },
   quickCreateProduct: (merchantId: string, body: Record<string, unknown>, idempotencyKey: string) =>
     request<{ product: ApiProduct; suggestion: unknown; idempotentReplay: boolean }>("POST", `/v1/merchants/${merchantId}/products/quick`, { body, idempotencyKey }),
+  // ── Functional 04 catalog ──────────────────────────────────────────────────
+  catalogList: (merchantId: string, params: { search?: string; category?: string; type?: string; status?: string; includeArchived?: boolean; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set("search", params.search);
+    if (params.category) qs.set("category", params.category);
+    if (params.type) qs.set("type", params.type);
+    if (params.status) qs.set("status", params.status);
+    if (params.includeArchived) qs.set("includeArchived", "1");
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return request<CatalogListResult>("GET", `/v1/merchants/${merchantId}/products${q ? "?" + q : ""}`);
+  },
+  getProduct: (merchantId: string, productId: string) =>
+    request<ProductDetailResult>("GET", `/v1/merchants/${merchantId}/products/${productId}`),
+  createProduct: (merchantId: string, body: Record<string, unknown>, idempotencyKey: string) =>
+    request<{ product: ApiProduct; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/products`, { body, idempotencyKey }),
+  updateProduct: (merchantId: string, productId: string, body: Record<string, unknown>) =>
+    request<{ product: ApiProduct; changed: boolean }>("PATCH", `/v1/merchants/${merchantId}/products/${productId}`, { body }),
+  setProductStatus: (merchantId: string, productId: string, action: "activate" | "deactivate" | "archive", expectedVersion: number, reason?: string) =>
+    request<{ product: ApiProduct; changed: boolean }>("POST", `/v1/merchants/${merchantId}/products/${productId}/status`, { body: { action, expectedVersion, reason } }),
+  lookupBarcode: (merchantId: string, code: string) =>
+    request<{ product: ApiProduct }>("GET", `/v1/merchants/${merchantId}/products/barcode/${encodeURIComponent(code)}`),
+  listCategories: (merchantId: string) =>
+    request<{ categories: Category[] }>("GET", `/v1/merchants/${merchantId}/categories`),
+  createCategory: (merchantId: string, name: string) =>
+    request<{ category: Category; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/categories`, { body: { name } }),
+  renameCategory: (merchantId: string, categoryId: string, name: string) =>
+    request<{ category: Category }>("PATCH", `/v1/merchants/${merchantId}/categories/${categoryId}`, { body: { name } }),
+  aiPreviewImage: (merchantId: string, draftId: string, image: string, mimeType: string) =>
+    request<AiImageDraft>("POST", `/v1/merchants/${merchantId}/products/ai/preview`, { body: { draftId, inputKind: "image", image, mimeType } }),
+  aiSuggestCategory: (merchantId: string, draftId: string, name: string) =>
+    request<{ draftId: string; inputKind: "category"; category: CategorySuggestion }>("POST", `/v1/merchants/${merchantId}/products/ai/preview`, { body: { draftId, inputKind: "category", name } }),
+  aiConfirm: (merchantId: string, suggestionId: string, decision: "accept" | "reject", acceptedFields?: string[]) =>
+    request<{ suggestionId: string; status: string }>("POST", `/v1/merchants/${merchantId}/products/ai/${suggestionId}/confirm`, { body: { decision, acceptedFields } }),
   preview: (merchantId: string, body: { items: CartItemInput[]; adjustments?: AdjustmentInput[] }) =>
     request<PreviewResult>("POST", `/v1/merchants/${merchantId}/sales/preview`, { body }),
   createOrder: (merchantId: string, body: { clientRequestId: string; items: CartItemInput[]; adjustments?: AdjustmentInput[]; note?: string }) =>
