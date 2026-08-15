@@ -24,6 +24,21 @@ import {
   Step8Review,
 } from "./Steps";
 
+// Turn raw DB errors from the finish step into plain-language Vietnamese the
+// shop owner can act on. The duplicate-tax-code case matters most: the schema
+// enforces a globally-unique tax_code, and the spec requires we don't merge —
+// we guide the user to check or clear it (they can tap "Sửa" on the review).
+function friendlyFinishError(message: string): string {
+  const m = (message || "").toLowerCase();
+  if (m.includes("merchants_tax_code_unique") || m.includes("tax_code")) {
+    return "Mã số thuế này đã được đăng ký cho một cửa hàng khác. Vui lòng kiểm tra lại, hoặc để trống mã số thuế rồi thử lại.";
+  }
+  if (m.includes("auth_required")) {
+    return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+  }
+  return "Chưa tạo được cửa hàng. Vui lòng kiểm tra kết nối mạng và thử lại.";
+}
+
 export function OnboardingFlow({
   initialSession,
   onComplete,
@@ -201,10 +216,7 @@ export function OnboardingFlow({
       }
       onComplete(merchantId);
     } catch (e) {
-      setError(
-        (e as Error).message ||
-          "Chưa tạo được cửa hàng. Vui lòng thử lại.",
-      );
+      setError(friendlyFinishError((e as Error).message));
       finishingRef.current = false; // allow retry (RPC is idempotent per key)
       setBusy(false);
     }
