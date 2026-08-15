@@ -11,6 +11,7 @@ import type {
   RegistrationStatus,
 } from "./enums";
 import { normalizeTaxCode } from "./validators";
+import type { DashboardSnapshot, OpenAction } from "./dashboard";
 
 // ── Consents (append-only log; inserted right after first auth) ──────────────
 export async function insertConsents(
@@ -238,6 +239,123 @@ export async function loadPaymentConnection(
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as PaymentRow | null) ?? null;
+}
+
+// ── Today dashboard (Functional 02) reads ────────────────────────────────────
+// The single boundary the client crosses for the dashboard. A future Node/Hono
+// server layer can replace the bodies of these three functions (call an API
+// instead of Supabase) without touching the dashboard components.
+
+/**
+ * Real-time dashboard snapshot via the `get_today_dashboard` RPC. The RPC does
+ * its own merchant-role check and RLS also applies, so a user only ever gets
+ * their own merchant's numbers. `p_business_date: null` → today in the
+ * merchant's timezone (spec 3.3).
+ */
+export async function getTodayDashboard(
+  merchantId: string,
+): Promise<DashboardSnapshot> {
+  const { data, error } = await supabase.rpc("get_today_dashboard", {
+    p_merchant_id: merchantId,
+    p_business_date: null,
+  });
+  if (error) throw new Error(error.message);
+  return data as DashboardSnapshot;
+}
+
+export interface LowStockProduct {
+  productId: string;
+  name: string;
+  onHand: number;
+  threshold: number;
+}
+
+interface InventoryJoinRow {
+  product_id: string;
+  on_hand: number | string;
+  low_stock_threshold: number | string;
+  products: { id: string; name: string } | { id: string; name: string }[] | null;
+}
+
+/**
+ * Top low-stock products (spec 3 "Tồn kho thấp"): active + inventory-tracked
+ * products whose on_hand ≤ low_stock_threshold, most-depleted first. PostgREST
+ * can't compare two columns, so we filter is_active/track_inventory server-side
+ * and do the on_hand≤threshold comparison client-side over the (small) result.
+ */
+export async function loadLowStockProducts(
+  merchantId: string,
+  limit = 3,
+): Promise<LowStockProduct[]> {
+  const { data, error } = await supabase
+    .from("inventory_levels")
+    .select(
+      "product_id, on_hand, low_stock_threshold, products!inner(id, name)",
+    )
+    .eq("merchant_id", merchantId)
+    .eq("products.is_active", true)
+    .eq("products.track_inventory", true);
+  if (error) throw new Error(error.message);
+
+  const rows = (data as InventoryJoinRow[] | null) ?? [];
+  return rows
+    .map((r) => {
+      const p = Array.isArray(r.products) ? r.products[0] : r.products;
+      return {
+        productId: r.product_id,
+        name: p?.name ?? "Sản phẩm",
+        onHand: Number(r.on_hand),
+        threshold: Number(r.low_stock_threshold),
+      };
+    })
+    .filter((p) => p.onHand <= p.threshold)
+    .sort((a, b) => a.onHand - b.onHand || a.name.localeCompare(b.name, "vi"))
+    .slice(0, limit);
+}
+
+interface ActionItemRow {
+  id: string;
+  action_type: string;
+  severity: "critical" | "warning" | "info";
+  title: string;
+  description: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  detected_at: string;
+}
+
+/**
+ * Open action_items ordered by severity then most-recent (FR-06). The
+ * action_severity enum is declared critical→warning→info, so ordering the enum
+ * column ascending already yields the P1→P3 priority order.
+ */
+export async function loadOpenActionItems(
+  merchantId: string,
+  limit = 10,
+): Promise<OpenAction[]> {
+  const { data, error } = await supabase
+    .from("action_items")
+    .select(
+      "id, action_type, severity, title, description, entity_type, entity_id, detected_at",
+    )
+    .eq("merchant_id", merchantId)
+    .eq("status", "open")
+    .order("severity", { ascending: true })
+    .order("detected_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+
+  const rows = (data as ActionItemRow[] | null) ?? [];
+  return rows.map((r) => ({
+    id: r.id,
+    actionType: r.action_type,
+    severity: r.severity,
+    title: r.title,
+    description: r.description,
+    entityType: r.entity_type,
+    entityId: r.entity_id,
+    detectedAt: r.detected_at,
+  }));
 }
 
 // ── Settings edits ───────────────────────────────────────────────────────────

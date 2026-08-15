@@ -8,6 +8,7 @@ import { OnboardingFlow } from "./onboarding/OnboardingFlow";
 import { MerchantProvider } from "./dashboard/MerchantContext";
 import { AppShell } from "./dashboard/AppShell";
 import { Home } from "./dashboard/Home";
+import { AttentionListPage } from "./dashboard/AttentionListPage";
 import { TaxPage } from "./dashboard/TaxPage";
 import { SettingsPage } from "./dashboard/SettingsPage";
 import {
@@ -73,6 +74,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<Home />} />
+            <Route path="/viec-can-xu-ly" element={<AttentionListPage />} />
             <Route path="/ban-hang" element={<POSPage />} />
             <Route path="/don-hang" element={<OrdersPage />} />
             <Route path="/kho" element={<InventoryPage />} />

@@ -1034,3 +1034,371 @@ select.input {
 .spacer {
   flex: 1 1 auto;
 }
+
+/* ── Today dashboard (Functional 02) ─────────────────────────────────────── */
+.today-head__meta {
+  font-size: 12.5px;
+  opacity: 0.82;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.today-head__updated {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.85;
+  min-height: 15px;
+}
+.today-head__offline {
+  color: #ffd7a6;
+  font-weight: 600;
+}
+.iconbtn--spin svg {
+  animation: spin 0.8s linear infinite;
+}
+
+.today-offline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.today-offline__retry {
+  flex: 0 0 auto;
+  border: none;
+  background: rgba(196, 125, 22, 0.16);
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--pill);
+}
+
+/* Net revenue hero (most prominent) */
+.net-hero {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: none;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  padding: 20px 18px;
+}
+.net-hero--fresh {
+  cursor: default;
+}
+.net-hero__label {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.net-hero__value {
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--ink);
+  margin-top: 6px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.net-hero__value--neg {
+  color: var(--danger);
+}
+.net-hero__value--muted {
+  font-size: 20px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.net-hero__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.net-hero__link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--teal);
+  font-weight: 700;
+  font-size: 13px;
+}
+.net-hero__fresh {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin-top: 12px;
+}
+.net-hero__fresh b {
+  color: var(--teal-700);
+}
+
+/* Stat pair (bill count / attention) */
+.stat-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+.stat-mini {
+  text-align: left;
+  border: none;
+  padding: 16px;
+}
+.stat-mini__label {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.stat-mini__value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--ink);
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.stat-mini__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--amber);
+  display: inline-block;
+}
+
+/* Cash / QR split */
+.cashqr {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  margin-top: 12px;
+}
+.cashqr__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ratio {
+  display: flex;
+  height: 12px;
+  border-radius: var(--pill);
+  overflow: hidden;
+  margin: 12px 0;
+  background: var(--navy-050);
+}
+.ratio__cash {
+  background: var(--teal);
+  height: 100%;
+}
+.ratio__qr {
+  background: var(--navy);
+  height: 100%;
+}
+.ratio__empty {
+  width: 100%;
+  background: var(--navy-050);
+}
+.cashqr__legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cashqr__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cashqr__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.cashqr__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.cashqr__swatch--cash {
+  background: var(--teal);
+}
+.cashqr__swatch--qr {
+  background: var(--navy);
+}
+.cashqr__val {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+/* AI summary */
+.ai-card {
+  margin-top: 12px;
+  background: linear-gradient(180deg, #f4faf9 0%, #ffffff 100%);
+  border: 1px solid var(--teal-050);
+}
+.ai-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-card__badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--teal-100);
+  color: var(--teal-700);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.ai-card__title {
+  font-weight: 800;
+  color: var(--ink);
+  font-size: 15px;
+}
+.ai-card__body {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.55;
+  margin-top: 8px;
+}
+
+/* Section head with "Xem tất cả" */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.section-head__all {
+  border: none;
+  background: none;
+  color: var(--teal);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 4px;
+}
+
+/* Attention / low-stock rows */
+.attn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.attn__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  padding: 14px 14px;
+  background: #fff;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-soft);
+}
+.attn__dot {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+}
+.attn__dot--p1 {
+  background: var(--danger-050);
+  color: var(--danger);
+}
+.attn__dot--p2 {
+  background: var(--amber-050);
+  color: var(--amber);
+}
+.attn__dot--p3 {
+  background: #fbf6e0;
+  color: #a58210;
+}
+.attn__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.attn__title {
+  display: block;
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 14.5px;
+}
+.attn__desc {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* Fixed "Tạo bill" CTA above the bottom nav */
+.today-cta {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);
+  width: calc(100% - 36px);
+  max-width: 444px;
+  min-height: 52px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--teal);
+  color: #fff;
+  font-size: 16.5px;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(13, 122, 111, 0.4);
+  transition: transform 0.05s ease, background 0.15s ease;
+}
+.today-cta:active {
+  transform: translateX(-50%) scale(0.99);
+  background: var(--teal-700);
+}
+
+/* Extra bottom room so content clears the fixed CTA + nav */
+.screen--tabbed .content {
+  padding-bottom: calc(var(--nav-h) + 64px);
+}
+
+/* Skeletons */
+.skel {
+  border-radius: var(--r-lg);
+  background: linear-gradient(90deg, #eef2f6 25%, #e2e8ee 37%, #eef2f6 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease infinite;
+}
+.skel--hero {
+  height: 128px;
+}
+.skel--mini {
+  height: 86px;
+  border-radius: var(--r-lg);
+}
+.skel--card {
+  height: 110px;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
