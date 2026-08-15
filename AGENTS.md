@@ -1,11 +1,13 @@
 # Project agent memory
 
 SoHo "Thiết lập cửa hàng" — a mobile-first, Vietnamese, MoMo-style **PWA** for
-household-business onboarding (Functional 01: creates the store's operating
-profile; no selling/inventory/invoicing yet). Vite + React + TS SPA talking
-**directly to Supabase** from the client, served by a combined Node server that
-also hosts the pre-existing PayOS payment API. Product spec:
-`/home/nguye/firstmate/data/soho-onboarding-app/soho-functional-01.md`.
+household businesses. Functional 01: onboarding that creates the store's
+operating profile. Functional 02: the "Trang Hôm nay" (Today) dashboard —
+read-only daily revenue/attention view (no selling yet). Vite + React + TS SPA
+talking **directly to Supabase** from the client, served by a combined Node
+server that also hosts the pre-existing PayOS payment API. Specs:
+`/home/nguye/firstmate/data/soho-onboarding-app/soho-functional-01.md`,
+`/home/nguye/firstmate/data/soho-today-dashboard/soho-functional-02.md`.
 
 ## Commands
 - `npm run dev` — Vite dev server.
@@ -19,6 +21,13 @@ also hosts the pre-existing PayOS payment API. Product spec:
 - Onboarding: `src/onboarding/` (8-step flow in `Steps.tsx`, orchestration + draft/resume
   + idempotent finish in `OnboardingFlow.tsx`).
 - Post-onboarding app: `src/dashboard/` (MoMo-style Home, real routed pages, `react-router`).
+- Today dashboard (Functional 02): `src/dashboard/Home.tsx` **is** the Today screen;
+  `useTodayDashboard.ts` fetches + caches (localStorage `soho-today:v1:<merchantId>`, offline
+  fallback). Pure logic is unit-tested in `src/lib/`: `dashboard.ts` (snapshot type,
+  `derivePriorityItems`, `selectZeroState`), `summary.ts` (AI summary — only the deterministic
+  spec-9.4 fallback exists; provider-pluggable), `format.ts` (`formatVnd` VND đồng). Data access
+  is `getTodayDashboard`/`loadLowStockProducts`/`loadOpenActionItems` in `db.ts` (the one seam a
+  future server layer replaces).
 - Data/logic layer: `src/lib/` — `supabase.ts`, `auth.ts` (email+password, **isolated** so a
   future phone-OTP swap is one file), `db.ts` (all table/RPC access), `validators.ts` (pure,
   unit-tested), `enums.ts` (DB enum values + VN labels), `config.ts`.
@@ -42,6 +51,12 @@ also hosts the pre-existing PayOS payment API. Product spec:
   friendly VN message (`friendlyFinishError` in `OnboardingFlow.tsx`), not the raw Postgres error.
 - Auth: email+password with `mailer_autoconfirm` enabled on the project (no confirmation email).
   Test accounts use throwaway `soho-crew-test+<n>@soho.test` addresses (cannot delete auth users).
+- **Functional 02 numbers come from the `get_today_dashboard` RPC** (already deployed). The RPC
+  is `security invoker` + does `private.has_merchant_role`, so a privileged psql/service-role call
+  raises `FORBIDDEN`; verify the RPC via the authenticated client, or recompute with direct SQL.
+  Clients are read-only on orders/payments/etc. — seed verification data with privileged access via
+  `test/seed-today-dashboard.sql` (parameterized by `:merchant_id`; covers spec MET-01..07 +
+  INV-01/02 with expected values in comments). Business day = Asia/Ho_Chi_Minh 00:00.
 
 ## Maintaining this file
 
