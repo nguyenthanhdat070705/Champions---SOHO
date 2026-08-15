@@ -30,6 +30,7 @@
     ]
   },
   "scripts": {
+    "start": "node server/index.js",
     "serve": "node scripts/serve.mjs",
     "test": "node --test",
     "payos:confirm-webhook": "node scripts/confirm-payos-webhook.mjs"
