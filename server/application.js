@@ -8,7 +8,9 @@ import paymentHandler from "../api/payos/payment.js";
 import webhookHandler from "../api/payos/webhook.js";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const defaultSiteRoot = join(projectRoot, "site");
+// The SPA build output. In production `npm run build` emits the Vite bundle to
+// dist/, and this combined server serves it while also hosting the PayOS API.
+const defaultSiteRoot = join(projectRoot, "dist");
 const maxBodyBytes = 1024 * 1024;
 
 const mimeTypes = new Map([
@@ -20,12 +22,16 @@ const mimeTypes = new Map([
   [".jpg", "image/jpeg"],
   [".js", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".map", "application/json; charset=utf-8"],
   [".mp3", "audio/mpeg"],
   [".mp4", "video/mp4"],
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
   [".webm", "video/webm"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"],
   [".webp", "image/webp"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
 ]);
 
 const apiRoutes = new Map([
@@ -117,17 +123,63 @@ function sendHealth(response) {
   );
 }
 
+async function sendFile(request, response, filePath, statusCode = 200) {
+  const fileStats = await stat(filePath);
+  response.writeHead(statusCode, {
+    "Content-Length": fileStats.size,
+    "Content-Type":
+      mimeTypes.get(extname(filePath).toLowerCase()) ||
+      "application/octet-stream",
+  });
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+  createReadStream(filePath).pipe(response);
+}
+
+// SPA fallback: unknown navigations (paths without a file extension) get the
+// built index.html so client-side routing works on deep links / refresh.
+// Requests that look like missing assets (they have an extension) stay 404.
+async function serveSpaFallback(request, response, siteRoot, pathname) {
+  if (extname(pathname)) {
+    response.writeHead(404).end("Not found");
+    return;
+  }
+  const indexPath = join(siteRoot, "index.html");
+  try {
+    await sendFile(request, response, indexPath, 200);
+  } catch {
+    response.writeHead(404).end("Not found");
+  }
+}
+
 async function serveStaticFile(request, response, siteRoot, pathname) {
-  let filePath = safeStaticPath(siteRoot, pathname);
+  const filePath = safeStaticPath(siteRoot, pathname);
   if (!filePath) {
     response.writeHead(403).end("Forbidden");
     return;
   }
 
-  let fileStats = await stat(filePath);
-  if (fileStats.isDirectory()) {
-    filePath = join(filePath, "index.html");
+  let fileStats;
+  try {
     fileStats = await stat(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      await serveSpaFallback(request, response, siteRoot, pathname);
+      return;
+    }
+    throw error;
+  }
+
+  if (fileStats.isDirectory()) {
+    const indexPath = join(filePath, "index.html");
+    try {
+      await sendFile(request, response, indexPath, 200);
+    } catch {
+      await serveSpaFallback(request, response, siteRoot, pathname);
+    }
+    return;
   }
 
   if (!fileStats.isFile()) {
@@ -135,19 +187,7 @@ async function serveStaticFile(request, response, siteRoot, pathname) {
     return;
   }
 
-  response.writeHead(200, {
-    "Content-Length": fileStats.size,
-    "Content-Type":
-      mimeTypes.get(extname(filePath).toLowerCase()) ||
-      "application/octet-stream",
-  });
-
-  if (request.method === "HEAD") {
-    response.end();
-    return;
-  }
-
-  createReadStream(filePath).pipe(response);
+  await sendFile(request, response, filePath, 200);
 }
 
 export function createApplicationServer({ siteRoot = defaultSiteRoot } = {}) {
@@ -243,4 +283,3 @@ export function startApplicationServer({
 
   return server;
 }
-

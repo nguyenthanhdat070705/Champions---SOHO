@@ -1,44 +1,37 @@
 {
-  "name": "hallmark",
-  "version": "1.1.0",
-  "description": "A design skill for AI coding assistants. Makes the UIs they generate look made, not generated. Powered by Together AI.",
-  "keywords": [
-    "claude",
-    "claude-code",
-    "cursor",
-    "codex",
-    "skill",
-    "design",
-    "ui",
-    "anti-ai-slop",
-    "typography",
-    "oklch",
-    "together-ai"
-  ],
-  "license": "MIT",
+  "name": "soho-onboarding-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SoHo — Thiết lập cửa hàng (store onboarding) SPA + PayOS payment server",
   "type": "module",
-  "files": [
-    "skills"
-  ],
-  "skill": {
-    "entry": "skills/hallmark/SKILL.md",
-    "references": "skills/hallmark/references",
-    "harnesses": [
-      "claude-code",
-      "cursor",
-      "codex"
-    ]
-  },
-  "scripts": {
-    "start": "node server/index.js",
-    "serve": "node scripts/serve.mjs",
-    "test": "node --test",
-    "payos:confirm-webhook": "node scripts/confirm-payos-webhook.mjs"
-  },
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "serve": "node scripts/serve.mjs",
+    "test": "vitest run && node --test test/*.test.js",
+    "test:unit": "vitest run",
+    "test:server": "node --test test/*.test.js",
+    "payos:confirm-webhook": "node scripts/confirm-payos-webhook.mjs"
+  },
   "dependencies": {
-    "@payos/node": "^2.0.5"
+    "@payos/node": "^2.0.5",
+    "@supabase/supabase-js": "^2.45.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.2"
   }
 }
