@@ -35,6 +35,10 @@ import { DocumentDetail } from "./documents/DocumentDetail";
 import { EInvoicePage } from "./einvoice/EInvoicePage";
 import { CreateInvoice } from "./einvoice/CreateInvoice";
 import { InvoiceDetail } from "./einvoice/InvoiceDetail";
+import { CashbookPage } from "./cashbook/CashbookPage";
+import { CashbookEntry } from "./cashbook/CashbookEntry";
+import { ReviewQueue } from "./cashbook/ReviewQueue";
+import { ReviewItem } from "./cashbook/ReviewItem";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -116,6 +120,10 @@ export default function App() {
             <Route path="/hoa-don" element={<EInvoicePage />} />
             <Route path="/hoa-don/tao" element={<CreateInvoice />} />
             <Route path="/hoa-don/:id" element={<InvoiceDetail />} />
+            <Route path="/so-quy" element={<CashbookPage />} />
+            <Route path="/so-quy/can-xem" element={<ReviewQueue />} />
+            <Route path="/so-quy/can-xem/:id" element={<ReviewItem />} />
+            <Route path="/so-quy/:id" element={<CashbookEntry />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

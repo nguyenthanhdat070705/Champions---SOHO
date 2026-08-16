@@ -15,6 +15,7 @@ import { allocateLineRefund } from "./pricing.js";
 import { returnNumber } from "./numbering.js";
 import { writeAudit, enqueueOutbox } from "./audit.js";
 import { getMerchantContext } from "./sales.js";
+import { bestEffortIngest, ingestRefundById } from "../f11/ingest.js";
 
 /** Load the paid order + its succeeded payment, or fail. */
 async function loadPaidOrder(client, merchantId, orderId) {
@@ -190,7 +191,7 @@ export async function createReturn(merchantId, userId, orderId, input, idempoten
   const method = input.refundMethod === "bank_transfer" ? "bank_transfer" : "cash";
   const reasonCode = String(input.reasonCode || "customer_change").slice(0, 64);
 
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     // idempotent replay
     const replay = await client.query(
       `select id, return_id, status, amount from public.payment_refunds where merchant_id=$1 and idempotency_key=$2`,
@@ -275,6 +276,12 @@ export async function createReturn(merchantId, userId, orderId, input, idempoten
       lines: lines.map((l) => ({ orderItemId: l.orderItemId, quantity: l.quantity, refundAmount: l.refundAmount, condition: l.condition })),
     };
   });
+  // F11 cashbook: a cash refund succeeds immediately → raise the 'out' entry
+  // post-commit (best-effort; bank_transfer waits for confirmRefund).
+  if (result?.refundStatus === "succeeded" && result.refundId) {
+    await bestEffortIngest(() => ingestRefundById(merchantId, result.refundId));
+  }
+  return result;
 }
 
 /**
@@ -282,7 +289,7 @@ export async function createReturn(merchantId, userId, orderId, input, idempoten
  * (spec 3.12 "Xác nhận đã hoàn tiền"). Only now does net revenue drop (RET-03).
  */
 export async function confirmRefund(merchantId, userId, refundId, reference) {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const { rows } = await client.query(
       `select * from public.payment_refunds where id=$1 and merchant_id=$2 for update`,
       [refundId, merchantId],
@@ -308,6 +315,11 @@ export async function confirmRefund(merchantId, userId, refundId, reference) {
     await writeAudit(client, { merchantId, actorUserId: userId, action: "refund.confirm", entityType: "refund", entityId: refundId, after: { reference, amount: Number(r.amount) } });
     return { refundId, status: "succeeded", orderId: r.order_id, amount: Number(r.amount) };
   });
+  // F11 cashbook: the refund is now succeeded → raise the 'out' entry post-commit.
+  if (result?.status === "succeeded" && result.refundId) {
+    await bestEffortIngest(() => ingestRefundById(merchantId, result.refundId));
+  }
+  return result;
 }
 
 /** List returns/refunds for an order (bill detail). */

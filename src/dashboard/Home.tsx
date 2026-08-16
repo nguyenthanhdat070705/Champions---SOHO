@@ -451,6 +451,7 @@ function ServiceGrid() {
       { icon: <IconWallet size={24} />, label: "Chi phí", to: "/chi-phi", bg: "#c0392b" },
       { icon: <IconFile size={24} />, label: "Chứng từ", to: "/chung-tu", bg: "#0b6a8f" },
       { icon: <IconReceipt size={24} />, label: "Hóa đơn", to: "/hoa-don", bg: "#c2410c" },
+      { icon: <IconWallet size={24} />, label: "Sổ thu–chi", to: "/so-quy", bg: "#0e8a7a" },
       { icon: <IconChart size={24} />, label: "Báo cáo", to: "/bao-cao", bg: "#1f9d6b" },
       { icon: <IconTax size={24} />, label: "Thuế", to: "/thue", bg: "#e08a1e" },
       { icon: <IconSettings size={24} />, label: "Cài đặt", to: "/cai-dat", bg: "#12314d" },

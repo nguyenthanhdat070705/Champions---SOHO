@@ -32,7 +32,10 @@ export function AppShell() {
     /^\/chung-tu\/[^/]+$/.test(pathname) ||
     // E-invoice (F09): the create-from-bill and detail screens carry their own
     // bottom CTA; the list at /hoa-don keeps the tab bar.
-    /^\/hoa-don\/[^/]+$/.test(pathname);
+    /^\/hoa-don\/[^/]+$/.test(pathname) ||
+    // Cashbook (F11): the review-item resolve screen has a fixed .form-foot CTA →
+    // immersive. The sổ overview, entry detail and review list keep the tab bar.
+    /^\/so-quy\/can-xem\/[^/]+$/.test(pathname);
   return (
     <>
       <Outlet />

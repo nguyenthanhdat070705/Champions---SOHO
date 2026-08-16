@@ -10,6 +10,7 @@ import { ensureReceipt } from "./receipts.js";
 import { getMerchantContext, lockOrderRow, assertPricesUnchanged } from "./sales.js";
 import { createQrRequest, generateOrderCode, getQrRequest, cancelQrRequest } from "./payos.js";
 import { generateSuggestionsForOrder } from "./suggestions.js";
+import { bestEffortIngest, ingestPaymentById } from "../f11/ingest.js";
 
 const QR_TTL_SECONDS = 10 * 60;
 
@@ -81,7 +82,13 @@ async function consumeReservations(client, orderId) {
 export async function finalizeCash(merchantId, userId, { orderId, expectedVersion, cashReceived }, idempotencyKey) {
   if (!idempotencyKey) fail("IDEMPOTENCY_KEY_REQUIRED");
   try {
-    return await runFinalizeCash();
+    const result = await runFinalizeCash();
+    // F11 cashbook: raise the 'in' entry post-commit (best-effort; the sync scan
+    // + source-link unique are the durable backstop, so this never blocks a sale).
+    if (result?.status === "succeeded" && result.paymentId) {
+      await bestEffortIngest(() => ingestPaymentById(merchantId, result.paymentId));
+    }
+    return result;
   } catch (err) {
     // Concurrency: two same-key requests race past the idempotency SELECT and
     // both try to insert. The loser's unique-violation rolls back; re-read the
@@ -400,8 +407,9 @@ export async function confirmQrPayment(event) {
   const orderId = payment0.order_id;
   const cashier = payment0.cashier_user_id;
 
+  let outcome;
   try {
-    return await withTransaction(async (client) => {
+    outcome = await withTransaction(async (client) => {
       // Record the provider event (idempotent on provider_event_id = reference).
       const evt = await client.query(
         `insert into public.payment_provider_events
@@ -487,6 +495,12 @@ export async function confirmQrPayment(event) {
   } finally {
     generateSuggestionsForOrder(merchantId, orderId).catch(() => {});
   }
+  // F11 cashbook: raise the 'in' entry once a QR payment truly succeeds (skip the
+  // duplicate-webhook path — the entry already exists). Best-effort, post-commit.
+  if (outcome?.status === "succeeded" && outcome.paymentId && !outcome.duplicate) {
+    await bestEffortIngest(() => ingestPaymentById(merchantId, outcome.paymentId));
+  }
+  return outcome;
 }
 
 function hashRef(reference, amount) {

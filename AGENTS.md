@@ -20,6 +20,10 @@ toán). Functional 08:
 "Hộp chứng từ" — the document box: upload/view/link/archive every photo (JPG/PNG/WEBP) with
 short-lived signed URLs, server-computed hash dedupe, and links to bills/expenses/receipts. Functional 10:
 "Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat assistant over the merchant's own data.
+Functional 11: "Sổ thu–chi tự động" — an automatic cashbook: confirmed money events (payment/refund
+success, purchase/expense accounting_events) map deterministically to one posted cashbook entry (+
+source link) when certain, or a "Cần xem" review item when not; posted lines are immutable, fixed by
+appending an opposite adjustment (đảo). Coverage/summary are computed live per period.
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
 server**, which also hosts the pre-existing PayOS API. Specs:
@@ -32,7 +36,8 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
 `/home/nguye/firstmate/data/soho-f6-receiving/soho-functional-06.md`,
 `/home/nguye/firstmate/data/soho-f8-documents/soho-functional-08.md`,
 `/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
-`amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy).
+`amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy),
+`/home/nguye/firstmate/data/soho-f11-cashbook/soho-functional-11.md`.
 
 ## Commands
 - `npm run dev` — Vite dev server.
@@ -193,6 +198,23 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   accept/reject drives the mock). `parts.tsx` (status badge, `MockProviderBanner`, buyer form, ack +
   relation sheets). Pure mirror + types in `src/lib/einvoice.ts` (unit-tested). Entry: Home grid "Hóa đơn"
   tile + a Thuế-page link. `/hoa-don/:id` and `/hoa-don/tao` are `immersive` in `AppShell.tsx`.
+- **Functional 11 server (`server/f11/`, reuses F3 auth/pool/audit/errors + F5 idem/deterministicUuid):**
+  `mapping.js` is the pure deterministic rule table (unit-tested `test/f11-cashbook.test.js`):
+  `MAPPINGS[sourceType:eventType]` → direction/entryType/method/autoPost, `classifySource` (post|review|
+  skip; missing date/method/amount downgrades an auto-post to review — never guesses), `sourceHash`,
+  taxonomy + reason codes, `RULE_VERSION`. `ingest.js` = the write core: `postEntryTx` (entry + source
+  link atomic, idempotent on the links unique via a SAVEPOINT so no orphan entry), `upsertReviewTx`,
+  `ingest{Payment,Refund,AccountingEvent}ById`, `syncMerchant` (on-demand gap-fill scan), plus
+  `bestEffortIngest` used by the F3 post-commit hooks (finalizeCash / confirmQrPayment / confirmRefund).
+  `cashbook.js` = reads + review + reverse: `computePeriod` (pure, VN-local), `getSummary` (+ live
+  `coverage`), `listEntries` (cursor), `getEntry`, review `patch/preview/post/exclude`, `createManualDraft`,
+  `reverseEntry`. Routes wired into `server/f3/router.js` under `/v1/merchants/:mid/cashbook/*`.
+- **Functional 11 client (`src/cashbook/`):** `CashbookPage.tsx` (route `/so-quy`, overview + period tabs
+  + thu/chi/chênh + coverage + Cần xem banner + entries list + Ghi tay FAB + sync), `CashbookEntry.tsx`
+  (`/so-quy/:id`, detail + source drill-down + reverse sheet), `ReviewQueue.tsx` (`/so-quy/can-xem`),
+  `ReviewItem.tsx` (`/so-quy/can-xem/:id` — fill → preview → post, immersive), `ManualDraftSheet.tsx`,
+  `parts.tsx`. Pure mirror `src/lib/cashbook.ts` (unit-tested `cashbook.test.ts`). All calls via
+  `src/lib/api.ts`. Home grid + reads are any member; writes owner/manager (server enforces).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -397,6 +419,42 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   seller MST seeded so readiness passes). Not in `npm test` (`.mjs`, needs DB). **Verified LIVE green:
   27/27 on the real DB + a browser walkthrough (Home tile → list badges → accepted detail with XML/PDF
   artifacts + relation → rejected detail with retry).**
+- **F11 schema quirks (deployed, don't re-derive):** `cashbook_adjustments` has a SINGLE
+  `adjustment_entry_id` + `reason` text (NOT the spec §8.4 reversal/replacement/reason_code/note split);
+  unique `cashbook_one_reversal (merchant_id, original_entry_id)` = the one-reversal guard.
+  `cashbook_period_snapshots` does NOT exist → summary + coverage are computed LIVE per period (no
+  snapshot rows). `cashbook_entries.entry_type` is free text (no CHECK) — the taxonomy allowlist lives
+  in `server/f11/mapping.js` `ENTRY_TYPES` (sales_receipt/other_receipt/sales_refund/operating_expense/
+  inventory_purchase/adjustment). `cashbook_entries.created_by` is NOT NULL FK auth.users, so auto-posts
+  use the merchant OWNER as the system actor (`resolveSystemActor`). Clients have NO write grants — ALL
+  cashbook access is server-only via the pooler (F3 pattern); no RLS is relied upon.
+- **F11 reversal model (spec §7.1 "không update giá trị bản gốc"):** the original entry is NEVER mutated
+  (status stays `posted`); a reversal only appends an opposite-direction `posted` `adjustment` entry (same
+  amount + occurred_at) + one `cashbook_adjustments` row. **Totals = `status='posted'` ONLY** (uses the
+  `cashbook_entry_period` partial index); the reversed original + its contra both count and net to zero —
+  do NOT flip the original to `reversed` or the offset math breaks (the `adjustment_entry_id` NOT NULL FK
+  also forces a contra to exist). "Reversed" is a DERIVED display state (an adjustment row references the
+  entry as `original_entry_id`).
+- **F11 mapping decisions (founder-pending, spec §13.2):** payment.succeeded → auto-post in/sales_receipt
+  (method cash→cash, qr→transfer); refund.succeeded → auto-post out/sales_refund; purchase_received &
+  expense_posted accounting_events → ALWAYS review (accounting_events carries no payment_method, and a
+  purchase ≠ cash-paid), reason `needs_payment_confirmation`/`missing_payment_method`. F07 expense &
+  F09/F06 purchase auto-posting is one MAPPINGS edit away once those events carry a method. source_type
+  in links = payment|refund|purchase_receipt|expense|manual (source_id = the row id; deep-link resolved
+  live: payment/refund→/don-hang/:orderId, purchase_receipt→/nhap-hang/:receiptId).
+- **F11 ingest paths:** (1) in-process post-commit hooks in F3 `finalizeCash`/`confirmQrPayment`/
+  `confirmRefund`/`createReturn` (`bestEffortIngest` — swallows errors, never blocks a sale); (2) the
+  on-demand `POST /cashbook/sync` scan (owner/manager) that fills gaps for events fired before this
+  feature or by other lanes. Both are idempotent (source-link + review unique). Backfilling the two REAL
+  merchants' ~870 bills each = call `syncMerchant` per merchant (NOT done — left ready; never mutate
+  their source rows).
+- **F11 live E2E:** `PORT=3011 SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
+  `F11_BASE=http://localhost:3011 node --env-file=.env test/f11-e2e.mjs` runs the spec 12.3 P0 matrix
+  (replay/sync idempotency, mapping, hand-computed totals + timezone, review resolve→atomic post, reverse
+  + one-reversal guard + offset, manual draft, RLS cross-tenant, real-sale post-commit hook, immutability)
+  on `soho-crew-test+f11@soho.test` (+ `+f11b` for RLS) via `test/f11-setup.mjs` `ensureF11` (seeds
+  SYNTHETIC source rows — order+payment+refund+accounting_event — into the test tenant only). Not in
+  `npm test` (`.mjs`, needs DB).
 
 ## Maintaining this file
 

@@ -376,6 +376,46 @@ export const api = {
     `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/artifacts/${type}`,
   einvoiceSimulate: (merchantId: string, body: { invoiceId: string; decision: "accept" | "reject"; rejectCode?: string }) =>
     request<{ processed: boolean; duplicated: boolean; signatureValid: boolean; status: string | null }>("POST", "/v1/dev/e-invoice/simulate", { body: { merchantId, ...body } }),
+  // ── Functional 11 cashbook (sổ thu–chi) ────────────────────────────────────
+  cashbookSummary: (merchantId: string, params: { period?: CashbookPeriod; from?: string; to?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.period) qs.set("period", params.period);
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return request<CashbookSummary>("GET", `/v1/merchants/${merchantId}/cashbook/summary${q ? "?" + q : ""}`);
+  },
+  cashbookEntries: (merchantId: string, params: CashbookEntriesQuery = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null && v !== "") qs.set(k, String(v));
+    const q = qs.toString();
+    return request<CashbookEntriesResult>("GET", `/v1/merchants/${merchantId}/cashbook/entries${q ? "?" + q : ""}`);
+  },
+  cashbookEntry: (merchantId: string, entryId: string) =>
+    request<CashbookEntryDetail>("GET", `/v1/merchants/${merchantId}/cashbook/entries/${entryId}`),
+  cashbookReverse: (merchantId: string, entryId: string, body: { reasonCode: string; note?: string }, idempotencyKey: string) =>
+    request<{ originalEntryId: string; reversalEntryId: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/cashbook/entries/${entryId}/reverse`, { body, idempotencyKey }),
+  cashbookReview: (merchantId: string, params: { status?: string; reasonCode?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.reasonCode) qs.set("reasonCode", params.reasonCode);
+    const q = qs.toString();
+    return request<{ items: CashbookReviewItem[] }>("GET", `/v1/merchants/${merchantId}/cashbook/review${q ? "?" + q : ""}`);
+  },
+  cashbookGetReview: (merchantId: string, reviewId: string) =>
+    request<{ item: CashbookReviewItem }>("GET", `/v1/merchants/${merchantId}/cashbook/review/${reviewId}`),
+  cashbookPatchReview: (merchantId: string, reviewId: string, body: CashbookDraftFields & { expectedRowVersion?: number }) =>
+    request<CashbookReviewItem>("PATCH", `/v1/merchants/${merchantId}/cashbook/review/${reviewId}`, { body }),
+  cashbookPreviewReview: (merchantId: string, reviewId: string) =>
+    request<CashbookReviewPreview>("POST", `/v1/merchants/${merchantId}/cashbook/review/${reviewId}/preview`, { body: {} }),
+  cashbookPostReview: (merchantId: string, reviewId: string, body: { expectedRowVersion?: number }, idempotencyKey: string) =>
+    request<{ entryId: string; status: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/cashbook/review/${reviewId}/post`, { body, idempotencyKey }),
+  cashbookExcludeReview: (merchantId: string, reviewId: string, body: { reasonCode: string; note?: string; expectedRowVersion?: number }) =>
+    request<{ reviewId: string; status: string; reasonCode: string }>("POST", `/v1/merchants/${merchantId}/cashbook/review/${reviewId}/exclude`, { body }),
+  cashbookManualDraft: (merchantId: string, body: CashbookDraftFields, idempotencyKey: string) =>
+    request<{ reviewId: string; status: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/cashbook/manual-drafts`, { body, idempotencyKey }),
+  cashbookSync: (merchantId: string, body: { limit?: number } = {}) =>
+    request<{ scanned: number; posted: number; review: number; replayed: number; skipped: number }>("POST", `/v1/merchants/${merchantId}/cashbook/sync`, { body }),
 };
 
 // ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──
@@ -597,3 +637,45 @@ export interface DocContent { url: string; action: "preview" | "download"; expir
 export interface DocUploadInput { fileBase64: string; mimeType: string; documentType?: DocType | null; documentNumber?: string; force?: boolean; }
 export interface DocUploadResult { document: DocSummary; duplicateOverridden: boolean; replayed: boolean; }
 export interface DocLinkCandidate { targetId: string; number: string | null; createdAt: string; route: string | null; }
+
+// ── Functional 11 cashbook (sổ thu–chi) ──────────────────────────────────────
+export type CashbookPeriod = "today" | "week" | "month" | "custom";
+export type CashbookDirection = "in" | "out";
+export type CashbookMethod = "cash" | "transfer" | "other" | "unknown";
+export interface CashbookSource { sourceType: string; sourceId: string; label: string; route: string | null; sourceEventType?: string; sourceVersion?: number; }
+export interface CashbookTypeTotal { direction: CashbookDirection; entryType: string; label: string; count: number; total: number; }
+export interface CashbookCoverage { expected: number; processed: number; review: number; failed: number; pct: number; complete: boolean; }
+export interface CashbookSummary {
+  period: CashbookPeriod; from: string; to: string; timezone: string; asOf: string;
+  totalIn: number; totalOut: number; difference: number;
+  byType: CashbookTypeTotal[]; coverage: CashbookCoverage; reviewCount: number; ruleVersion: string;
+}
+export interface CashbookEntryRow {
+  id: string; direction: CashbookDirection; entryType: string; entryLabel: string;
+  amountVnd: number; occurredAt: string; paymentMethod: CashbookMethod; status: string;
+  reversed: boolean; reversesEntryId: string | null; source: CashbookSource | null;
+}
+export interface CashbookEntriesResult { entries: CashbookEntryRow[]; hasMore: boolean; nextCursor: string | null; }
+export interface CashbookEntriesQuery { direction?: string; entryType?: string; method?: string; status?: string; from?: string; to?: string; cursor?: string; limit?: number; }
+export interface CashbookEntryDetail {
+  entry: { id: string; direction: CashbookDirection; entryType: string; entryLabel: string; amountVnd: number; occurredAt: string; paymentMethod: CashbookMethod; status: string; ruleVersion: string; createdAt: string; };
+  sources: CashbookSource[];
+  reversed: boolean; reversalEntryId: string | null; reversesEntryId: string | null; reversalReason: string | null;
+  canReverse: boolean; timeline: { state: string; at: string }[];
+}
+export interface CashbookDraftFields { direction?: CashbookDirection; entryType?: string; amountVnd?: number; occurredAt?: string; paymentMethod?: CashbookMethod; note?: string | null; }
+export interface CashbookReviewDraft {
+  sourceType: string | null; sourceId: string | null; sourceLabel: string | null; route?: string | null;
+  direction: CashbookDirection | null; entryType: string | null; amountVnd: number | null;
+  occurredAt: string | null; paymentMethod: CashbookMethod; note: string | null;
+}
+export interface CashbookReviewItem {
+  id: string; eventId: string; status: string; rowVersion: number;
+  reasonCodes: string[]; reasons: { code: string; label: string }[]; ready: boolean;
+  draft: CashbookReviewDraft; createdAt: string;
+}
+export interface CashbookReviewPreview {
+  reviewItemId: string; expectedRowVersion: number;
+  preview: { direction: CashbookDirection; entryType: string; entryLabel: string; amountVnd: number; occurredAt: string; paymentMethod: CashbookMethod; ruleVersion: string; };
+  impact: { direction: CashbookDirection; amountVnd: number };
+}

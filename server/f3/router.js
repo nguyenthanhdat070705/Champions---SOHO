@@ -50,6 +50,12 @@ import {
   validateInvoice, submitInvoice, getStatus as getInvoiceStatus, processProviderEvent,
   simulateProviderDecision, retryDraft, createRelation, getArtifact,
 } from "../f9/invoices.js";
+import {
+  getSummary, listEntries, getEntry, reverseEntry,
+  listReview, getReview, patchReview, previewReview, postReview, excludeReview,
+  createManualDraft,
+} from "../f11/cashbook.js";
+import { syncMerchant } from "../f11/ingest.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -876,6 +882,102 @@ const ROUTES = [
     const ifMatch = body.expectedVersion != null ? Number(body.expectedVersion)
       : (ifMatchHeader != null ? Number(String(ifMatchHeader).replace(/"/g, "")) : null);
     sendJson(c.res, 200, await updateDraft(merchantId, userId, expenseId, body, ifMatch));
+  }],
+
+  // ── Functional 11: Sổ thu–chi tự động (cashbook) ─────────────────────────
+  // Reads = any ACTIVE member; writes (review/post/exclude/reverse/manual/sync)
+  // = owner/manager (spec §12.1). Specific paths BEFORE the /:id catches.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/cashbook\/summary$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await getSummary(merchantId, {
+      period: sp.get("period") || undefined, from: sp.get("from") || undefined, to: sp.get("to") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/sync$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await syncMerchant(merchantId, { limit: body.limit }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/manual-drafts$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createManualDraft(merchantId, userId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/cashbook\/entries$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listEntries(merchantId, {
+      direction: sp.get("direction") || undefined, entryType: sp.get("entryType") || undefined,
+      method: sp.get("method") || undefined, status: sp.get("status") || undefined,
+      from: sp.get("from") || undefined, to: sp.get("to") || undefined,
+      cursor: sp.get("cursor") || undefined, limit: sp.get("limit") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/entries\/([^/]+)\/reverse$/, async (c) => {
+    const [merchantId, entryId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await reverseEntry(merchantId, userId, entryId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/cashbook\/entries\/([^/]+)$/, async (c) => {
+    const [merchantId, entryId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getEntry(merchantId, entryId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/cashbook\/review$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listReview(merchantId, {
+      status: sp.get("status") || undefined, reasonCode: sp.get("reasonCode") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/review\/([^/]+)\/preview$/, async (c) => {
+    const [merchantId, reviewId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await previewReview(merchantId, reviewId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/review\/([^/]+)\/post$/, async (c) => {
+    const [merchantId, reviewId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await postReview(merchantId, userId, reviewId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/cashbook\/review\/([^/]+)\/exclude$/, async (c) => {
+    const [merchantId, reviewId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await excludeReview(merchantId, userId, reviewId, await readBody(c.req)));
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/cashbook\/review\/([^/]+)$/, async (c) => {
+    const [merchantId, reviewId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const ifMatch = body.expectedRowVersion != null ? body.expectedRowVersion
+      : (c.req.headers["if-match"] != null ? Number(String(c.req.headers["if-match"]).replace(/"/g, "")) : null);
+    sendJson(c.res, 200, await patchReview(merchantId, userId, reviewId, body, ifMatch));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/cashbook\/review\/([^/]+)$/, async (c) => {
+    const [merchantId, reviewId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getReview(merchantId, reviewId));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────
