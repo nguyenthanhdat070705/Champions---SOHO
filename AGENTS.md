@@ -13,11 +13,12 @@ reversal, and stock counts (kiểm kê) with blind counting + atomic variance po
 "Nhập hàng" — goods receiving: form-first purchase receipts (supplier snapshot, lines, server totals)
 + a photo path (chụp chứng từ → private storage → Gemini extraction → line-match review) that raise
 stock via one 'purchase_receipt' movement per line and create ONE pending accounting_event, all
-atomic; posted receipts are immutable (reverse appends opposite movements). Functional 10:
-reversal, and stock counts (kiểm kê) with blind counting + atomic variance posting. Functional 07: "Ghi nhận chi phí" — the expense recorder:
+atomic; posted receipts are immutable (reverse appends opposite movements). Functional 07: "Ghi nhận chi phí" — the expense recorder:
 quick manual/photo(Gemini)-draft → server-computed totals → atomic post (expense + payment fact +
 ONE accounting_event pending) with duplicate detection, immutable-once-posted + reversal (đảo bút
-toán). Functional 10:
+toán). Functional 08:
+"Hộp chứng từ" — the document box: upload/view/link/archive every photo (JPG/PNG/WEBP) with
+short-lived signed URLs, server-computed hash dedupe, and links to bills/expenses/receipts. Functional 10:
 "Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat assistant over the merchant's own data.
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
@@ -29,6 +30,7 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
 `/home/nguye/firstmate/data/soho-f4-catalog/soho-functional-04.md`,
 `/home/nguye/firstmate/data/soho-f5-inventory/soho-functional-05.md`,
 `/home/nguye/firstmate/data/soho-f6-receiving/soho-functional-06.md`,
+`/home/nguye/firstmate/data/soho-f8-documents/soho-functional-08.md`,
 `/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
 `amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy).
 
@@ -154,6 +156,23 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   + duplicate-finding decisions), `parts.tsx` (StatusBadge/CategoryChips/PaymentPicker/DuplicateSheet).
   Pure helpers in `src/lib/expenses.ts` (unit-tested). Home grid has a "Chi phí" tile; `/chi-phi/moi` and
   `/chi-phi/:id` are `immersive` in `AppShell.tsx` (they carry a `.form-foot` CTA).
+- **Functional 08 server (`server/f8/`, reuses F3 auth/pool/audit/errors + F5 idem):** `documents.js` is
+  the document-box service — `uploadDocument` (server-computed SHA-256 → merchant dedupe → storage
+  upload under the caller's JWT → `source_documents` insert; on DB failure the object is removed to avoid
+  an orphan), `listDocuments` (filters + batch-signed thumbnails, one storage call, not audited),
+  `getDocumentDetail`, `getContent` (status/purpose check → access-event → short-lived signed URL),
+  `addLink`/`removeLink`/`listLinkCandidates`, `setArchiveState`. `resolveLinks` UNIONs F8 `document_links`
+  with F6/F7 back-refs (`expenses.document_id`, `purchase_receipts.document_id`) so their docs appear
+  linked automatically — no back-fill. `storage.js` = per-request Supabase client on the user JWT (upload/
+  sign/remove). `types.js` = pure allowlists/validators (unit-tested `test/f8-documents.test.js`). Routes
+  added to `server/f3/router.js` under `/v1/merchants/:mid/documents{,/link-candidates,/:id,/:id/content,
+  /:id/links,/:id/links/:linkId,/:id/archive}` (upload uses a 20 MB body cap; other routes stay 1 MB).
+- **Functional 08 client (`src/documents/`):** `DocumentsPage.tsx` **is** the Hộp chứng từ screen (route
+  `/chung-tu`, search + linked/type chips + upload FAB), `DocumentDetail.tsx` (`/chung-tu/:id` — signed-URL
+  preview, metadata, links panel, access history, archive/restore), `parts.tsx` (badges + `UploadSheet` +
+  `LinkSheet`). Pure helpers/validators in `src/lib/documents.ts` (unit-tested, mirrors `types.js`).
+  Home service grid + `/cai-dat` entry point; owner/manager/cashier upload+link, only owner/manager
+  remove-link/archive (server-enforced).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -302,6 +321,32 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   duplicate/reverse/double-reverse/RLS) on `soho-crew-test+f7@soho.test` (`test/f7-setup.mjs`
   `ensureF7Merchant`, never a real merchant). Tests reuse the merchant, so non-dup post tests use unique
   amounts / ack duplicates to stay stable across runs. Not in `npm test` (`.mjs`, needs DB).
+- **F8 schema is MERGED + MINIMAL (deployed, don't re-derive):** `source_documents` carries BOTH F6
+  cols (`object_key`, `content_hash` NOT NULL, `perceptual_hash`, `document_number`, `captured_at`,
+  `retention_status`) and F8 cols (`status` default `'ready'`, `mime_type`, `byte_size`, `sha256`,
+  `document_type`, `active_extraction_id`, `retain_until`, `legal_hold`, `row_version`, `created_by`
+  nullable, `finalized_at`). There are **NO CHECK constraints** (status/link_type are free text — enforce
+  in `server/f8/types.js`), **NO unique index on the hash** (dedupe is a query on `(merchant_id,
+  content_hash)`, the only index), and **NO DB helper fns / RLS-bypass helpers** (pooler + Node
+  `requireMembership`, exactly like F3/F5). Write `content_hash` AND `sha256` to the SAME server hash;
+  read either. `document_extractions` is F6-shape (`extractor_version`, `payload`) — unused by F8 MVP.
+- **F8 storage bucket `documents` (private) is the hard limit:** `allowed_mime_types` = image/jpeg|png|
+  webp ONLY (**PDF is blocked by the bucket** — spec lists PDF but it can't be uploaded here without a
+  migration; MVP is image-only), `file_size_limit` = 10 MB. Storage RLS requires the object key's FIRST
+  path segment to be a merchant the caller is an active member of → keys are ALWAYS
+  `${merchantId}/${uuid}.${ext}`. The server has no service key: it uploads / signs / removes via a
+  Supabase client on the caller's JWT (`server/f8/storage.js`). Upload POST needs a 20 MB body cap
+  (base64), added as a `readBody` arg in `server/f3/router.js`.
+- **F8 links integrate F6/F7 by read-time UNION, not back-fill:** `resolveLinks` UNIONs `document_links`
+  with `expenses.document_id` + `purchase_receipts.document_id` back-refs (both tables carry a
+  `document_id`) so their docs show as linked automatically; auto back-refs are `primary`/`source:auto`
+  and NOT removable from F8 (that would edit the owning record). Only `order` deep-links to a live page
+  (`/don-hang/:id`); `expense`/`purchase_receipt` routes resolve once F6/F7 land. Purge is OUT of MVP.
+- **F8 `/chung-tu/:id` (detail) is `immersive` in `AppShell.tsx`**; the list `/chung-tu` keeps the nav.
+- **F8 live E2E:** `F8_BASE=http://localhost:<port> node --env-file=.env test/f8-e2e.mjs` (server running
+  with `.env` + a non-3000 `PORT`) runs upload/hash/dedupe+override/idempotency/MIME-gate/signed-URL+
+  access-audit/link+unlink/target-verify/expense-backref/archive+restore/RLS-cross-tenant on
+  `soho-crew-test+f8@soho.test` (`test/f8-setup.mjs`, never a real merchant). Not in `npm test`.
 
 ## Maintaining this file
 

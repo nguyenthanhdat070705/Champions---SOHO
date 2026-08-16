@@ -23,10 +23,13 @@ export function AppShell() {
       pathname !== "/ton-kho/doi-chieu") ||
     // Receiving (F06): the receipt editor/detail carry their own bottom CTA; the
     // list at /nhap-hang keeps the tab bar (its FAB clears the nav).
-    /^\/nhap-hang\/.+/.test(pathname);
+    /^\/nhap-hang\/.+/.test(pathname) ||
     // Expenses (F07): the quick form and the detail/reverse screen carry their own
     // bottom CTA; the list at /chi-phi keeps the tab bar (its FAB clears the nav).
-    /^\/chi-phi\/.+/.test(pathname);
+    /^\/chi-phi\/.+/.test(pathname) ||
+    // Documents (F08): detail carries its own back header + action bar; the list
+    // at /chung-tu keeps the tab bar (its FAB clears the nav).
+    /^\/chung-tu\/[^/]+$/.test(pathname);
   return (
     <>
       <Outlet />

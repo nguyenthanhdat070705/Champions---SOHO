@@ -311,6 +311,36 @@ export const api = {
     request<{ findingId: string; status: string }>("POST", `/v1/merchants/${merchantId}/expenses/${id}/duplicate-decision`, { body: { findingId, decision } }),
   aiExpensePreview: (merchantId: string, image: string, mimeType: string) =>
     request<AiExpensePreviewResult>("POST", `/v1/merchants/${merchantId}/expenses/ai/preview`, { body: { image, mimeType } }),
+  // ── Functional 08 documents (Hộp chứng từ) ──────────────────────────────────
+  documentsList: (merchantId: string, params: DocListParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set("search", params.search);
+    if (params.type) qs.set("type", params.type);
+    if (params.linked && params.linked !== "all") qs.set("linked", params.linked);
+    if (params.month) qs.set("month", params.month);
+    if (params.includeArchived) qs.set("includeArchived", "1");
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return request<DocListResult>("GET", `/v1/merchants/${merchantId}/documents${q ? "?" + q : ""}`);
+  },
+  documentGet: (merchantId: string, id: string) =>
+    request<DocDetailResult>("GET", `/v1/merchants/${merchantId}/documents/${id}`),
+  documentContent: (merchantId: string, id: string, action: "preview" | "download" = "preview") =>
+    request<DocContent>("GET", `/v1/merchants/${merchantId}/documents/${id}/content?action=${action}`),
+  documentUpload: (merchantId: string, body: DocUploadInput, idempotencyKey: string) =>
+    request<DocUploadResult>("POST", `/v1/merchants/${merchantId}/documents`, { body, idempotencyKey }),
+  documentAddLink: (merchantId: string, id: string, body: { targetType: string; targetId: string; linkType: string }, idempotencyKey: string) =>
+    request<{ link: DocLink; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/documents/${id}/links`, { body, idempotencyKey }),
+  documentRemoveLink: (merchantId: string, id: string, linkId: string) =>
+    request<{ removed: boolean; linkId: string }>("DELETE", `/v1/merchants/${merchantId}/documents/${id}/links/${linkId}`),
+  documentLinkCandidates: (merchantId: string, targetType: string, search?: string) => {
+    const qs = new URLSearchParams({ targetType });
+    if (search) qs.set("search", search);
+    return request<{ targetType: string; targetLabel: string; candidates: DocLinkCandidate[] }>("GET", `/v1/merchants/${merchantId}/documents/link-candidates?${qs.toString()}`);
+  },
+  documentArchive: (merchantId: string, id: string, action: "archive" | "restore", expectedVersion?: number) =>
+    request<{ document: DocSummary; changed: boolean }>("POST", `/v1/merchants/${merchantId}/documents/${id}/archive`, { body: { action, expectedVersion } }),
 };
 
 // ── AI Assistant (Functional 10) ─────────────────────────────────────────────
@@ -490,3 +520,37 @@ export interface AiExpenseDraft {
   totalVnd: number | null; taxVnd: number | null; categoryCandidates: string[]; warnings: string[];
 }
 export interface AiExpensePreviewResult { draft: AiExpenseDraft; documentId: string | null; contentHash: string | null; model: string; }
+// ── Functional 08 documents ──────────────────────────────────────────────────
+export type DocType = "purchase_invoice" | "goods_receipt" | "expense" | "sales_invoice" | "other";
+export type DocStatus = "uploading" | "processing" | "review" | "ready" | "quarantined" | "archived" | "purged";
+export type DocLinkedFilter = "all" | "linked" | "unlinked";
+export interface DocLink {
+  linkId: string | null; targetType: string; targetId: string; targetLabel: string;
+  linkType: "primary" | "supporting" | "other"; number: string | null; route: string | null;
+  source: "manual" | "auto"; removable: boolean; missing: boolean; createdAt?: string;
+}
+export interface DocSummary {
+  id: string; status: DocStatus; documentType: DocType | null; documentTypeLabel: string | null;
+  documentNumber: string | null; mimeType: string | null; byteSize: number | null; sha256: string | null;
+  capturedAt: string; finalizedAt: string | null; retainUntil: string | null; legalHold: boolean;
+  retentionStatus: string | null; rowVersion: number; createdBy: string | null;
+  linked?: boolean; linkCount?: number; primaryLink?: DocLink | null; thumbUrl?: string | null;
+}
+export interface DocListParams {
+  search?: string; type?: DocType; linked?: DocLinkedFilter; month?: string;
+  includeArchived?: boolean; limit?: number; offset?: number;
+}
+export interface DocListResult {
+  documents: DocSummary[]; hasMore: boolean; nextOffset: number | null;
+  summary: { total: number; linked: number; unlinked: number };
+}
+export interface DocAccessEntry { action: string; purpose: string | null; createdAt: string; actorName: string | null; }
+export interface DocDetailResult {
+  document: DocSummary; links: DocLink[];
+  pages: { pageNo: number; width: number | null; height: number | null }[];
+  access: DocAccessEntry[];
+}
+export interface DocContent { url: string; action: "preview" | "download"; expiresIn: number; }
+export interface DocUploadInput { fileBase64: string; mimeType: string; documentType?: DocType | null; documentNumber?: string; force?: boolean; }
+export interface DocUploadResult { document: DocSummary; duplicateOverridden: boolean; replayed: boolean; }
+export interface DocLinkCandidate { targetId: string; number: string | null; createdAt: string; route: string | null; }

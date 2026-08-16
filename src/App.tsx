@@ -30,6 +30,8 @@ import { ReceiptScreen } from "./receiving/ReceiptScreen";
 import { ExpensesPage } from "./expenses/ExpensesPage";
 import { ExpenseForm } from "./expenses/ExpenseForm";
 import { ExpenseDetail } from "./expenses/ExpenseDetail";
+import { DocumentsPage } from "./documents/DocumentsPage";
+import { DocumentDetail } from "./documents/DocumentDetail";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -106,6 +108,8 @@ export default function App() {
             <Route path="/chi-phi" element={<ExpensesPage />} />
             <Route path="/chi-phi/moi" element={<ExpenseForm />} />
             <Route path="/chi-phi/:id" element={<ExpenseDetail />} />
+            <Route path="/chung-tu" element={<DocumentsPage />} />
+            <Route path="/chung-tu/:id" element={<DocumentDetail />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

@@ -41,11 +41,18 @@ import {
   listDuplicateFindings, decideDuplicate,
 } from "../f7/expenses.js";
 import { aiExpensePreview } from "../f7/ai.js";
+import {
+  listDocuments, getDocumentDetail, getContent, uploadDocument,
+  addLink, removeLink, listLinkCandidates, setArchiveState,
+} from "../f8/documents.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
+// The document upload route carries a base64 image (≤10 MB → ~14 MB encoded), so
+// it needs a larger cap than the JSON control-plane routes (spec 12.4 pilot limit).
+const MAX_UPLOAD_BODY = 20 * 1024 * 1024;
 
-function readBody(req) {
+function readBody(req, max = MAX_BODY) {
   return new Promise((resolve, reject) => {
     if (req.body !== undefined) {
       // Already parsed upstream.
@@ -58,7 +65,7 @@ function readBody(req) {
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new DomainError("VALIDATION", "Body quá lớn.")); req.destroy(); return; }
+      if (size > max) { reject(new DomainError("VALIDATION", "Body quá lớn.")); req.destroy(); return; }
       chunks.push(c);
     });
     req.on("end", () => {
@@ -423,6 +430,69 @@ const ROUTES = [
     await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
     const body = await readBody(c.req);
     sendJson(c.res, 200, await updateReceipt(merchantId, userId, receiptId, body, body.expectedVersion));
+  }],
+
+  // ── Functional 08: Hộp chứng từ (documents) ───────────────────────────────
+  // NB: specific sub-paths (link-candidates, links, content, archive) MUST be
+  // listed before /documents/:id so they win the match.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/documents$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listDocuments(merchantId, getBearerToken(c.req), {
+      search: sp.get("search") || undefined, type: sp.get("type") || undefined,
+      linked: sp.get("linked") || undefined, month: sp.get("month") || undefined,
+      includeArchived: sp.get("includeArchived") === "1",
+      limit: sp.get("limit") || undefined, offset: sp.get("offset") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/documents$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req, MAX_UPLOAD_BODY);
+    const result = await uploadDocument(merchantId, userId, getBearerToken(c.req), body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/documents\/link-candidates$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listLinkCandidates(merchantId, sp.get("targetType"), sp.get("search") || undefined));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/documents\/([^/]+)\/links$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 201, await addLink(merchantId, userId, documentId, body, idemKey(c.req)));
+  }],
+  ["DELETE", /^\/v1\/merchants\/([^/]+)\/documents\/([^/]+)\/links\/([^/]+)$/, async (c) => {
+    const [merchantId, documentId, linkId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await removeLink(merchantId, userId, documentId, linkId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/documents\/([^/]+)\/content$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getContent(merchantId, userId, getBearerToken(c.req), documentId, c.url.searchParams.get("action") || "preview"));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/documents\/([^/]+)\/archive$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await setArchiveState(merchantId, userId, documentId, body.action || "archive", body.expectedVersion));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/documents\/([^/]+)$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getDocumentDetail(merchantId, documentId));
   }],
 
   // ── Preview / draft ──────────────────────────────────────────────────────

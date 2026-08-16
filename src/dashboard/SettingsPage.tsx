@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Banner,
   Button,
@@ -7,7 +8,7 @@ import {
   SelectField,
   TextField,
 } from "../components/ui";
-import { IconLogout } from "../components/icons";
+import { IconChevron, IconFile, IconLogout } from "../components/icons";
 import { useMerchant } from "./MerchantContext";
 import { signOut } from "../lib/auth";
 import {
@@ -58,6 +59,7 @@ export function SettingsPage() {
           payment={payment}
           onSaved={refresh}
         />
+        <ToolsSection />
         <AccountSection email={email} />
       </div>
     </div>
@@ -358,6 +360,22 @@ function PaymentSection({
           }
         }}
       />
+    </SectionCard>
+  );
+}
+
+// ── Tools (document box) ─────────────────────────────────────────────────────
+function ToolsSection() {
+  const nav = useNavigate();
+  return (
+    <SectionCard title="Công cụ">
+      <button className="doc-link-row" onClick={() => nav("/chung-tu")} style={{ width: "100%", cursor: "pointer" }}>
+        <span className="doc-link-row__main">
+          <span className="doc-link-row__t"><IconFile size={16} /> Hộp chứng từ</span>
+          <span className="doc-link-row__d">Ảnh/PDF hóa đơn, phiếu nhập, chứng từ chi và liên kết nghiệp vụ.</span>
+        </span>
+        <IconChevron size={18} color="#9aa7b4" />
+      </button>
     </SectionCard>
   );
 }
