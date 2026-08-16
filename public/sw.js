@@ -1,8 +1,15 @@
 // Minimal service worker: enough for install-to-home-screen + a fast app shell.
 // Network-first for navigations (so deploys/new content win), cache-first for
 // static assets already fetched. API and Supabase calls are never cached.
-const CACHE = "soho-shell-v2";
-const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+const CACHE = "soho-shell-v3";
+const SHELL = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/logo-full.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

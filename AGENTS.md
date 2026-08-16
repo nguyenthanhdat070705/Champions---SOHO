@@ -658,6 +658,17 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   test tenant at start so it is re-runnable. Not in `npm test` (`.mjs`, needs DB). **Verified LIVE green:
   12/12 + browser walkthrough (Thuế → /so-sach → books → v2 snapshot package with exact split → CSV export).**
 
+- **Branding / theme (deployed):** brand anchors are deep navy **`#122560`** and tiffany **`#81D8D0`**
+  (CSS tokens `--navy` / `--brand-teal` in `src/index.css`; `--teal #178f86` is the readable deep-tiffany
+  accent for text/icons on white; primary buttons + `--ink` are navy). Bottom-nav selected tab = a `#D3D3D3`
+  pill with navy label (`.bottomnav__item--on`). Low/out-of-stock is RED `--low #dc2626` (`.inv-row__qty--low/
+  --out`, `.pill--low/--out`, `.prod__stock--low/--out`, `.attn__low`) — NOT amber. The official logo lives in
+  `public/logo-full.png` (transparent, welcome/auth splash at ~80% opacity via `.brand-logo`) + `logo-mark.png`
+  (monogram); PWA icons (`icon-{192,512}[.-maskable].png`, `apple-touch-icon.png`, `favicon-{32,48}.png`,
+  `favicon.svg`) are all on the navy square. Regenerate every asset deterministically from the source jpg with
+  `python3 scripts/make-brand-assets.py [src.jpg]` (Pillow; removes near-white bg). Bump `CACHE` in
+  `public/sw.js` when icons change so installed PWAs re-fetch.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

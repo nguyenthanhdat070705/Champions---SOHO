@@ -73,13 +73,16 @@ export function Step1Welcome({
       }
     >
       <div style={{ textAlign: "center", padding: "12px 0 6px" }}>
-        <div className="brandmark">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-        <h1 className="h-title" style={{ marginTop: 18 }}>
+        {/* Official SoHo logo at the app opening. Captain's order: apply an
+            ~80% opacity treatment to the decorative splash mark. */}
+        <img
+          className="brand-logo"
+          src="/logo-full.png"
+          alt="SoHo"
+          width={240}
+          height={171}
+        />
+        <h1 className="h-title" style={{ marginTop: 14 }}>
           Chào mừng đến với SoHo
         </h1>
         <p className="h-sub">
@@ -255,7 +258,14 @@ export function Step2Auth({
         </>
       }
     >
-      <h1 className="h-title" style={{ marginTop: 8 }}>
+      <img
+        className="brand-logo brand-logo--sm"
+        src="/logo-full.png"
+        alt="SoHo"
+        width={168}
+        height={120}
+      />
+      <h1 className="h-title" style={{ marginTop: 6 }}>
         {mode === "signup" ? "Tạo tài khoản SoHo" : "Đăng nhập SoHo"}
       </h1>
       <p className="h-sub">Đăng nhập bằng Email + Mật khẩu.</p>

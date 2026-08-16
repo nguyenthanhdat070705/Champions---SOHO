@@ -369,13 +369,14 @@ function LowStockSection({ products }: { products: LowStockProduct[] }) {
             className="attn__row"
             onClick={() => nav(`/ton-kho/${p.productId}`)}
           >
-            <span className="attn__dot attn__dot--p3">
+            <span className="attn__dot attn__dot--low">
               <IconBox size={15} />
             </span>
             <span className="attn__main">
               <span className="attn__title">{p.name}</span>
               <span className="attn__desc">
-                Còn {formatQty(p.onHand)} / ngưỡng {formatQty(p.threshold)}
+                <b className="attn__low">Còn {formatQty(p.onHand)}</b> / ngưỡng{" "}
+                {formatQty(p.threshold)}
               </span>
             </span>
             <IconChevron size={18} color="#9aa7b4" />

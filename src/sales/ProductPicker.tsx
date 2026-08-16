@@ -115,13 +115,18 @@ export function ProductPicker({
             const qty = qtyInCart(cart, p.id);
             const idx = lineIndex(cart, p.id);
             const soldOut = p.trackInventory && p.onHand != null && p.onHand <= 0;
+            const low =
+              p.trackInventory && !soldOut && p.onHand != null &&
+              p.lowStockThreshold != null && p.onHand <= p.lowStockThreshold;
             return (
               <div key={p.id} className={`prod ${soldOut ? "prod--out" : ""}`}>
                 <button className="prod__tap" disabled={soldOut} onClick={() => onAdd(p)}>
                   <div className="prod__name">{p.name}</div>
                   <div className="prod__price">{formatVnd(p.salePrice)}</div>
                   {p.trackInventory && (
-                    <div className="prod__stock">{soldOut ? "Hết hàng" : `Tồn ${fmtQty(p.onHand ?? 0)}`}</div>
+                    <div className={`prod__stock ${soldOut ? "prod__stock--out" : low ? "prod__stock--low" : ""}`}>
+                      {soldOut ? "Hết hàng" : `Tồn ${fmtQty(p.onHand ?? 0)}`}
+                    </div>
                   )}
                 </button>
                 {qty > 0 && (
