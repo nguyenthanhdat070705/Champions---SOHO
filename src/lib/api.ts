@@ -5,6 +5,7 @@
 // INSUFFICIENT_STOCK, PAYMENT_ALREADY_SUCCEEDED, …). Same-origin in production;
 // the Vite dev proxy forwards /v1 to the combined server.
 import { supabase } from "./supabase";
+import type { Invoice, InvoiceListItem, EligibleOrder, ValidateResult, InvoiceBuyer } from "./einvoice";
 
 export class ApiError extends Error {
   code: string;
@@ -341,7 +342,49 @@ export const api = {
   },
   documentArchive: (merchantId: string, id: string, action: "archive" | "restore", expectedVersion?: number) =>
     request<{ document: DocSummary; changed: boolean }>("POST", `/v1/merchants/${merchantId}/documents/${id}/archive`, { body: { action, expectedVersion } }),
+  // ── Functional 09 e-invoice ────────────────────────────────────────────────
+  einvoiceList: (merchantId: string, params: { status?: string; search?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.search) qs.set("search", params.search);
+    const q = qs.toString();
+    return request<{ invoices: EInvoiceListItem[] }>("GET", `/v1/merchants/${merchantId}/e-invoices${q ? "?" + q : ""}`);
+  },
+  einvoiceEligibleOrders: (merchantId: string, params: { search?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set("search", params.search);
+    const q = qs.toString();
+    return request<{ orders: EInvoiceEligibleOrder[] }>("GET", `/v1/merchants/${merchantId}/orders/invoice-eligible${q ? "?" + q : ""}`);
+  },
+  einvoiceCreate: (merchantId: string, body: { orderId: string; buyerKind?: string }, idempotencyKey: string) =>
+    request<{ invoice: EInvoice; existing: boolean; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/e-invoices`, { body, idempotencyKey }),
+  einvoiceGet: (merchantId: string, invoiceId: string) =>
+    request<EInvoice>("GET", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}`),
+  einvoiceSaveBuyer: (merchantId: string, invoiceId: string, buyer: EInvoiceBuyerInput, expectedVersion: number) =>
+    request<EInvoice>("PATCH", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/buyer`, { body: { buyer, expectedVersion } }),
+  einvoiceValidate: (merchantId: string, invoiceId: string, expectedVersion: number) =>
+    request<EInvoiceValidateResult>("POST", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/validate`, { body: { expectedVersion } }),
+  einvoiceSubmit: (merchantId: string, invoiceId: string, body: { expectedVersion: number; acknowledgements: { buyer_reviewed: boolean; amounts_reviewed: boolean } }, idempotencyKey: string) =>
+    request<{ invoiceId: string; submissionId: string | null; status: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/submit`, { body, idempotencyKey }),
+  einvoiceStatus: (merchantId: string, invoiceId: string, reconcile = false) =>
+    request<{ id: string; status: string; providerInvoiceRef: string | null; rowVersion: number; submissions: unknown[]; events: unknown[] }>("GET", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/status${reconcile ? "?reconcile=1" : ""}`),
+  einvoiceRetryDraft: (merchantId: string, invoiceId: string, idempotencyKey: string) =>
+    request<{ invoice: EInvoice; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/retry-draft`, { body: {}, idempotencyKey }),
+  einvoiceCreateRelation: (merchantId: string, invoiceId: string, body: { relationType: "adjustment" | "replacement"; reason: string }, idempotencyKey: string) =>
+    request<{ invoice: EInvoice; relationType: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/relations`, { body, idempotencyKey }),
+  einvoiceArtifactUrl: (merchantId: string, invoiceId: string, type: "xml" | "pdf") =>
+    `/v1/merchants/${merchantId}/e-invoices/${invoiceId}/artifacts/${type}`,
+  einvoiceSimulate: (merchantId: string, body: { invoiceId: string; decision: "accept" | "reject"; rejectCode?: string }) =>
+    request<{ processed: boolean; duplicated: boolean; signatureValid: boolean; status: string | null }>("POST", "/v1/dev/e-invoice/simulate", { body: { merchantId, ...body } }),
 };
+
+// ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──
+export type EInvoice = Invoice;
+export type EInvoiceListItem = InvoiceListItem;
+export type EInvoiceEligibleOrder = EligibleOrder;
+export type EInvoiceValidateResult = ValidateResult;
+export type { InvoiceBuyer };
+export interface EInvoiceBuyerInput { kind: "individual" | "organization"; name?: string | null; taxCode?: string | null; address?: string | null; email?: string | null; }
 
 // ── AI Assistant (Functional 10) ─────────────────────────────────────────────
 export interface ChatTurn { role: "user" | "assistant"; content: string; }

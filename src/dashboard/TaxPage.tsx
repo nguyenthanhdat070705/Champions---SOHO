@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useMerchant } from "./MerchantContext";
 import { Banner, LoadingScreen, PageHeader } from "../components/ui";
-import { IconCalendar, IconInfo, IconShield } from "../components/icons";
+import { IconCalendar, IconInfo, IconShield, IconReceipt, IconChevron } from "../components/icons";
 import {
   FILING_FREQUENCY_LABELS,
   REGISTRATION_STATUS_LABELS,
@@ -116,6 +116,19 @@ export function TaxPage() {
             <p className="muted">Chưa có hồ sơ thuế.</p>
           )}
         </div>
+
+        <button
+          className="card"
+          style={{ display: "flex", gap: 14, alignItems: "center", width: "100%", textAlign: "left" }}
+          onClick={() => nav("/hoa-don")}
+        >
+          <div className="list-row__ic"><IconReceipt size={20} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="list-row__t">Hóa đơn điện tử</div>
+            <div className="list-row__d">Xuất hóa đơn từ bill đã thanh toán, theo dõi trạng thái phát hành.</div>
+          </div>
+          <IconChevron size={18} />
+        </button>
 
         <Banner kind="info">
           Bạn có thể cập nhật tình trạng thuế bất cứ lúc nào trong mục Cài đặt.

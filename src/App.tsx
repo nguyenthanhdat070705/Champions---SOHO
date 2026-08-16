@@ -32,6 +32,9 @@ import { ExpenseForm } from "./expenses/ExpenseForm";
 import { ExpenseDetail } from "./expenses/ExpenseDetail";
 import { DocumentsPage } from "./documents/DocumentsPage";
 import { DocumentDetail } from "./documents/DocumentDetail";
+import { EInvoicePage } from "./einvoice/EInvoicePage";
+import { CreateInvoice } from "./einvoice/CreateInvoice";
+import { InvoiceDetail } from "./einvoice/InvoiceDetail";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -110,6 +113,9 @@ export default function App() {
             <Route path="/chi-phi/:id" element={<ExpenseDetail />} />
             <Route path="/chung-tu" element={<DocumentsPage />} />
             <Route path="/chung-tu/:id" element={<DocumentDetail />} />
+            <Route path="/hoa-don" element={<EInvoicePage />} />
+            <Route path="/hoa-don/tao" element={<CreateInvoice />} />
+            <Route path="/hoa-don/:id" element={<InvoiceDetail />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

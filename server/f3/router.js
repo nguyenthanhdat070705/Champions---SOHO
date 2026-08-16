@@ -45,6 +45,11 @@ import {
   listDocuments, getDocumentDetail, getContent, uploadDocument,
   addLink, removeLink, listLinkCandidates, setArchiveState,
 } from "../f8/documents.js";
+import {
+  listInvoices, listEligibleOrders, getInvoice, createDraft as createInvoiceDraft, updateBuyer,
+  validateInvoice, submitInvoice, getStatus as getInvoiceStatus, processProviderEvent,
+  simulateProviderDecision, retryDraft, createRelation, getArtifact,
+} from "../f9/invoices.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -73,6 +78,25 @@ function readBody(req, max = MAX_BODY) {
       try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
       catch { reject(new DomainError("VALIDATION", "JSON không hợp lệ.")); }
     });
+    req.on("error", reject);
+  });
+}
+
+/** Read the request body as the raw UTF-8 string (webhook signature needs bytes). */
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    if (req.body !== undefined) {
+      resolve(typeof req.body === "string" ? req.body : JSON.stringify(req.body));
+      return;
+    }
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY) { reject(new DomainError("VALIDATION", "Body quá lớn.")); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(chunks.length ? Buffer.concat(chunks).toString("utf8") : ""));
     req.on("error", reject);
   });
 }
@@ -493,6 +517,111 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId);
     sendJson(c.res, 200, await getDocumentDetail(merchantId, documentId));
+  }],
+
+  // ── Functional 09: hóa đơn điện tử (e-invoice) ────────────────────────────
+  // NB: specific paths (invoice-eligible, artifacts, status, validate, submit,
+  // buyer, retry-draft, relations) precede the generic /e-invoices/:id GET.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/orders\/invoice-eligible$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listEligibleOrders(merchantId, { search: sp.get("search") || undefined, limit: sp.get("limit") || undefined }));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/e-invoices$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listInvoices(merchantId, { status: sp.get("status") || undefined, search: sp.get("search") || undefined, limit: sp.get("limit") || undefined }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/e-invoices$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createInvoiceDraft(merchantId, userId, body, idemKey(c.req));
+    sendJson(c.res, result.existing || result.replayed ? 200 : 201, result);
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/buyer$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const ifMatchHeader = c.req.headers["if-match"];
+    const ifMatch = body.expectedVersion != null ? Number(body.expectedVersion)
+      : (ifMatchHeader != null ? Number(String(ifMatchHeader).replace(/"/g, "")) : null);
+    sendJson(c.res, 200, await updateBuyer(merchantId, userId, invoiceId, body.buyer || body, ifMatch));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/validate$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await validateInvoice(merchantId, userId, invoiceId, body.expectedVersion));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/submit$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await submitInvoice(merchantId, userId, invoiceId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 202, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/status$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getInvoiceStatus(merchantId, invoiceId, { reconcile: c.url.searchParams.get("reconcile") === "1" }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/retry-draft$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await retryDraft(merchantId, userId, invoiceId, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/relations$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createRelation(merchantId, userId, invoiceId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)\/artifacts\/([^/]+)$/, async (c) => {
+    const [merchantId, invoiceId, type] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const a = await getArtifact(merchantId, invoiceId, type);
+    c.res.setHeader("Content-Type", a.contentType);
+    c.res.setHeader("Cache-Control", "no-store");
+    c.res.setHeader("Content-Disposition", `inline; filename="${a.filename}"`);
+    c.res.statusCode = 200;
+    c.res.end(a.body);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/e-invoices\/([^/]+)$/, async (c) => {
+    const [merchantId, invoiceId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getInvoice(merchantId, invoiceId));
+  }],
+  // Provider webhook — NO user session; signature is the trust boundary (spec 9.4).
+  ["POST", /^\/v1\/webhooks\/e-invoice\/([^/]+)$/, async (c) => {
+    const [provider] = c.params;
+    const raw = await readRawBody(c.req);
+    const signature = c.req.headers["x-provider-signature"] || c.req.headers["x-signature"] || "";
+    const result = await processProviderEvent({ providerCode: provider, rawBody: raw, signature: String(signature) });
+    sendJson(c.res, 200, result);
+  }],
+  // Dev-only: drive an accept/reject decision through the same event path.
+  ["POST", /^\/v1\/dev\/e-invoice\/simulate$/, async (c) => {
+    if (!devEndpointsEnabled()) { sendErr(c.res, new DomainError("NOT_FOUND")); return; }
+    const { userId } = await verifyUser(c.req);
+    const body = await readBody(c.req);
+    await requireMembership(userId, body.merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await simulateProviderDecision(body.merchantId, body));
   }],
 
   // ── Preview / draft ──────────────────────────────────────────────────────

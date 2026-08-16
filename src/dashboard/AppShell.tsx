@@ -29,7 +29,10 @@ export function AppShell() {
     /^\/chi-phi\/.+/.test(pathname) ||
     // Documents (F08): detail carries its own back header + action bar; the list
     // at /chung-tu keeps the tab bar (its FAB clears the nav).
-    /^\/chung-tu\/[^/]+$/.test(pathname);
+    /^\/chung-tu\/[^/]+$/.test(pathname) ||
+    // E-invoice (F09): the create-from-bill and detail screens carry their own
+    // bottom CTA; the list at /hoa-don keeps the tab bar.
+    /^\/hoa-don\/[^/]+$/.test(pathname);
   return (
     <>
       <Outlet />

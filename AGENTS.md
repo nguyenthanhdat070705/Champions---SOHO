@@ -173,6 +173,26 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   `LinkSheet`). Pure helpers/validators in `src/lib/documents.ts` (unit-tested, mirrors `types.js`).
   Home service grid + `/cai-dat` entry point; owner/manager/cashier upload+link, only owner/manager
   remove-link/archive (server-enforced).
+- **Functional 09 server (`server/f9/`, reuses F3 auth/pool/audit/errors + F5 idem/deterministicUuid):**
+  "Hóa đơn điện tử". Pure + unit-tested: `mapping.js` (versioned retail tax-code table, `RULE_SET_VERSION`),
+  `totals.js` (tax-INCLUSIVE extraction so invoice total == bill total; canonical payload + sha256
+  `payload_hash`), `validation.js` (seller/buyer MST + line rules), `state.js` (reducer — no terminal
+  regress, out-of-order guard), `provider.js` (the `EInvoiceProvider` interface + **MockProvider**: HMAC
+  webhook sign/verify, deterministic providerRef, placeholder XML/PDF). `invoices.js` = the service:
+  create draft (order FOR UPDATE = INV-02 guard) / buyer autosave (If-Match) / validate (server recompute
+  → payload_hash) / **submit = freeze+enqueue tx then post-commit provider call** (deterministic
+  `client_request_id`=`soho-<id>-<rowVersion>` → durable double-tap dedupe) / webhook `processProviderEvent`
+  (signature → dedupe on `(provider_code,provider_event_id)` → reducer) / retry-draft / relations
+  (adjustment/replacement) / artifacts. Routes wired into `server/f3/router.js` under
+  `/v1/merchants/:mid/{e-invoices*,orders/invoice-eligible}` + `/v1/webhooks/e-invoice/:provider` (no auth,
+  signature is the trust boundary) + dev `/v1/dev/e-invoice/simulate`. Unit tests `test/f9-*.test.js`.
+- **Functional 09 client (`src/einvoice/`):** `EInvoicePage.tsx` (route `/hoa-don`, list+filters+FAB),
+  `CreateInvoice.tsx` (`/hoa-don/tao`, eligible paid bills → draft), `InvoiceDetail.tsx` (`/hoa-don/:id` —
+  ONE lifecycle screen: seller readiness → buyer form → lines/tax → validate → confirm/submit → đang xử lý
+  → accepted artifacts/relations | rejected retry; polls status while submitting; dev-only "Mô phỏng"
+  accept/reject drives the mock). `parts.tsx` (status badge, `MockProviderBanner`, buyer form, ack +
+  relation sheets). Pure mirror + types in `src/lib/einvoice.ts` (unit-tested). Entry: Home grid "Hóa đơn"
+  tile + a Thuế-page link. `/hoa-don/:id` and `/hoa-don/tao` are `immersive` in `AppShell.tsx`.
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -347,6 +367,36 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   with `.env` + a non-3000 `PORT`) runs upload/hash/dedupe+override/idempotency/MIME-gate/signed-URL+
   access-audit/link+unlink/target-verify/expense-backref/archive+restore/RLS-cross-tenant on
   `soho-crew-test+f8@soho.test` (`test/f8-setup.mjs`, never a real merchant). Not in `npm test`.
+- **F9 has NO signed e-invoice provider** (founder: not signed yet). Everything runs against the
+  **MockProvider** in `server/f9/provider.js` behind the `EInvoiceProvider` interface; a real provider
+  later is ONE new adapter (`registerProvider`) + secret, zero app changes. UI is labelled honestly
+  ("Nhà cung cấp thử nghiệm — chưa nối cơ quan thuế"); `accepted` shows "Đã phát hành" ONLY after a
+  verified event, never on HTTP 2xx. `EINVOICE_MOCK_SECRET` (server-only) signs webhooks; a real webhook
+  can't reach a laptop, so the **dev-only** `POST /v1/dev/e-invoice/simulate` (guarded by
+  `SOHO_DEV_ENDPOINTS=1`) drives accept/reject through the SAME signed event path.
+- **F9 tax model is tax-INCLUSIVE** (`server/f9/totals.js`): order line net = amount paid; tax is
+  extracted OUT of it so invoice total == bill total exactly (reconciles with F03). Do not re-gross.
+  Tax code/rate come ONLY from the versioned `mapping.js` table (`RULE_SET_VERSION` stamped per invoice),
+  never AI/client. Negative/edit of an accepted invoice is impossible — correction is a linked
+  adjustment/replacement draft (`e_invoice_relations`); the original flips to adjusted/replaced when the
+  child is accepted.
+- **F9 schema quirks (VERIFIED live, don't re-derive):** `e_invoices` has `profile_id` (NULLABLE, no FK →
+  set to `deterministicUuid('einvoice-profile:'+merchantId)`), `invoice_kind` DEFAULT **`'original'`** (NOT
+  'sale'), `created_by` NOT NULL, `rule_set_version` default `'VN-2026.1'` (F9 overrides with its own
+  `RULE_SET_VERSION`). **`e_invoice_items` AND `e_invoice_submissions` each carry a NOT-NULL `merchant_id`**
+  (easy to miss — the inserts MUST include it). `e_invoice_provider_events` has NO merchant_id + NOT-NULL
+  `payload_hash`. There is NO `e_invoice_profiles` table (seller snapshot reads `merchants`). Corrective
+  invoices use `invoice_kind = adjustment|replacement` so the partial-unique `(merchant_id, order_id,
+  invoice_kind) WHERE status NOT IN ('rejected','cancelled')` never clashes with the accepted `original`.
+  Artifacts are server-generated placeholders from the accepted snapshot (NOT stored in F08's
+  `source_documents` box — a documented MVP boundary).
+- **F9 live E2E:** `PORT=<p> SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
+  `F9_BASE=http://localhost:<p> node --env-file=.env test/f9-e2e.mjs` (spec 12.3 P0: eligibility, one-
+  original concurrency, totals, buyer MST, submit idempotency, webhook bad-sig + duplicate, artifacts,
+  relation, rejected retry, RLS) on `soho-crew-test+f9@soho.test` (`test/f9-setup.mjs ensureF9Merchant`,
+  seller MST seeded so readiness passes). Not in `npm test` (`.mjs`, needs DB). **Verified LIVE green:
+  27/27 on the real DB + a browser walkthrough (Home tile → list badges → accepted detail with XML/PDF
+  artifacts + relation → rejected detail with retry).**
 
 ## Maintaining this file
 
