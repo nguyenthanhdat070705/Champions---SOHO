@@ -27,6 +27,9 @@ import { CountSession } from "./inventory/CountSession";
 import { Reconciliation } from "./inventory/Reconciliation";
 import { ReceivingList } from "./receiving/ReceivingList";
 import { ReceiptScreen } from "./receiving/ReceiptScreen";
+import { ExpensesPage } from "./expenses/ExpensesPage";
+import { ExpenseForm } from "./expenses/ExpenseForm";
+import { ExpenseDetail } from "./expenses/ExpenseDetail";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -100,6 +103,9 @@ export default function App() {
             <Route path="/ton-kho/:productId" element={<InventoryLedger />} />
             <Route path="/nhap-hang" element={<ReceivingList />} />
             <Route path="/nhap-hang/:id" element={<ReceiptScreen />} />
+            <Route path="/chi-phi" element={<ExpensesPage />} />
+            <Route path="/chi-phi/moi" element={<ExpenseForm />} />
+            <Route path="/chi-phi/:id" element={<ExpenseDetail />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

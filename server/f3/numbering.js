@@ -27,6 +27,10 @@ export function returnNumber(businessDate) {
   return `TR${ymd(businessDate)}-${token(5)}`;
 }
 
+export function expenseNumber(businessDate) {
+  return `CP-${ymd(businessDate)}-${token(5)}`;
+}
+
 export function receiptNumber(prefix, businessDate) {
   const p = (prefix || "SOHO").replace(/[^A-Za-z0-9]/g, "").slice(0, 8) || "SOHO";
   return `${p}-${ymd(businessDate)}-${token(5)}`;

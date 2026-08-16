@@ -283,6 +283,34 @@ export const api = {
     request<DocumentExtraction>("POST", `/v1/merchants/${merchantId}/receiving/documents/${documentId}/extract`, { body: {} }),
   documentUrl: (merchantId: string, documentId: string) =>
     request<{ url: string; expiresIn: number }>("GET", `/v1/merchants/${merchantId}/receiving/documents/${documentId}/url`),
+  // ── Functional 07 expenses (ghi nhận chi phí) ──────────────────────────────
+  expenseCategories: (merchantId: string) =>
+    request<{ categories: ExpenseCategory[] }>("GET", `/v1/merchants/${merchantId}/expense-categories`),
+  listExpenses: (merchantId: string, params: { month?: string; status?: string; category?: string; search?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.month) qs.set("month", params.month);
+    if (params.status && params.status !== "all") qs.set("status", params.status);
+    if (params.category) qs.set("category", params.category);
+    if (params.search) qs.set("search", params.search);
+    const q = qs.toString();
+    return request<ExpenseListResult>("GET", `/v1/merchants/${merchantId}/expenses${q ? "?" + q : ""}`);
+  },
+  createExpense: (merchantId: string, body: CreateExpenseInput, idempotencyKey: string) =>
+    request<ExpenseDetail & { replayed?: boolean }>("POST", `/v1/merchants/${merchantId}/expenses`, { body: body as unknown as Record<string, unknown>, idempotencyKey }),
+  getExpense: (merchantId: string, id: string) =>
+    request<ExpenseDetail>("GET", `/v1/merchants/${merchantId}/expenses/${id}`),
+  updateExpense: (merchantId: string, id: string, body: CreateExpenseInput & { expectedVersion?: number }) =>
+    request<ExpenseDetail>("PATCH", `/v1/merchants/${merchantId}/expenses/${id}`, { body: body as unknown as Record<string, unknown> }),
+  postExpense: (merchantId: string, id: string, body: PostExpenseInput, idempotencyKey: string) =>
+    request<PostExpenseResult>("POST", `/v1/merchants/${merchantId}/expenses/${id}/post`, { body: body as unknown as Record<string, unknown>, idempotencyKey }),
+  reverseExpense: (merchantId: string, id: string, body: { reason?: string }, idempotencyKey: string) =>
+    request<{ expenseId: string; status: string; reversalEventId: string; replayed?: boolean }>("POST", `/v1/merchants/${merchantId}/expenses/${id}/reverse`, { body, idempotencyKey }),
+  expenseDuplicates: (merchantId: string, id: string) =>
+    request<{ findings: ExpenseDuplicateFinding[] }>("GET", `/v1/merchants/${merchantId}/expenses/${id}/duplicates`),
+  decideDuplicate: (merchantId: string, id: string, findingId: string, decision: "dismissed" | "confirmed") =>
+    request<{ findingId: string; status: string }>("POST", `/v1/merchants/${merchantId}/expenses/${id}/duplicate-decision`, { body: { findingId, decision } }),
+  aiExpensePreview: (merchantId: string, image: string, mimeType: string) =>
+    request<AiExpensePreviewResult>("POST", `/v1/merchants/${merchantId}/expenses/ai/preview`, { body: { image, mimeType } }),
 };
 
 // ── AI Assistant (Functional 10) ─────────────────────────────────────────────
@@ -413,3 +441,52 @@ export interface DocumentUploadResult {
   documentId: string; objectKey: string; contentHash: string; documentNumber: string | null; capturedAt: string;
   extraction?: DocumentExtraction;
 }
+// ── Functional 07 expenses ───────────────────────────────────────────────────
+export type ExpenseStatus = "draft" | "extracting" | "review" | "ready" | "posted" | "reversed" | "cancelled";
+export type PaymentMethod = "cash" | "transfer" | "other";
+export interface ExpenseCategory { id: string; code: string; displayName: string; status: "active" | "inactive"; global: boolean; taxHint: unknown | null; }
+export interface ExpenseListItem {
+  id: string; expenseNumber: string; status: ExpenseStatus; expenseDate: string; payeeName: string | null;
+  grandTotalVnd: number; categoryId: string | null; categoryName: string | null; hasDocument: boolean;
+  sourceType: string; paymentMethod: PaymentMethod | null; paymentStatus: "unconfirmed" | "confirmed" | "rejected" | null;
+}
+export interface ExpenseListResult { month: string; expenses: ExpenseListItem[]; summary: { postedTotalVnd: number; postedCount: number }; }
+export interface ExpenseHeader {
+  id: string; expenseNumber: string; status: ExpenseStatus; expenseDate: string; payeeName: string | null;
+  categoryId: string | null; categoryName: string | null; documentId: string | null; sourceType: string; sourceId: string | null;
+  subtotalVnd: number; taxAmountVnd: number; grandTotalVnd: number; rowVersion: number;
+  createdAt: string; postedAt: string | null; reversedAt: string | null;
+}
+export interface ExpenseItemRow { id: string; description: string; quantity: number; unitCostVnd: number; lineTotalVnd: number; taxAmountVnd: number; source: string; confidence: number | null; }
+export interface ExpensePaymentFact { method: PaymentMethod; confirmationStatus: "unconfirmed" | "confirmed" | "rejected"; confirmedBy: string | null; confirmedAt: string | null; evidenceDocumentId: string | null; }
+export interface ExpenseDocument { id: string; documentNumber: string | null; mimeType: string | null; byteSize: number | null; contentHash: string; status: string; }
+export interface ExpenseDuplicateFinding {
+  id: string; candidateExpenseId: string; signals: Record<string, unknown>; status: "open" | "dismissed" | "confirmed"; createdAt: string;
+  candidate: { expenseNumber: string; grandTotalVnd: number; expenseDate: string; payeeName: string | null };
+}
+export interface ExpenseAccountingEvent { id: string; eventType: string; amountVnd: number; reviewStatus: string; createdAt: string; }
+export interface ExpenseDetail {
+  expense: ExpenseHeader; items: ExpenseItemRow[]; paymentFact: ExpensePaymentFact | null;
+  document: ExpenseDocument | null; duplicateFindings: ExpenseDuplicateFinding[]; accountingEvents: ExpenseAccountingEvent[];
+}
+export interface CreateExpenseItemInput { description: string; quantity: number; unitCostVnd: number; taxAmountVnd?: number; source?: string; confidence?: number | null; }
+export interface CreateExpenseInput {
+  expenseDate?: string; payeeName?: string | null; categoryId?: string | null; amountVnd?: number; headerTaxVnd?: number;
+  items?: CreateExpenseItemInput[]; paymentMethod?: PaymentMethod; paymentConfirmed?: boolean;
+  documentId?: string | null; sourceType?: string; sourceId?: string | null;
+}
+export interface PostExpenseInput {
+  expectedVersion?: number;
+  paymentFact?: { method: PaymentMethod; confirmationStatus: "unconfirmed" | "confirmed" };
+  duplicateReview?: { status: "NOT_DUPLICATE"; reason?: string };
+}
+export interface PostExpenseResult {
+  expenseId: string; expenseNumber: string; status: string; grandTotalVnd: number;
+  accountingEventId: string | null; duplicates: number; replayed?: boolean; alreadyPosted?: boolean;
+}
+export interface AiExpenseDraft {
+  payee: string | null; expenseDate: string | null; documentNumber: string | null;
+  lines: { description: string; quantity: number; unitCostVnd: number; source: string }[];
+  totalVnd: number | null; taxVnd: number | null; categoryCandidates: string[]; warnings: string[];
+}
+export interface AiExpensePreviewResult { draft: AiExpenseDraft; documentId: string | null; contentHash: string | null; model: string; }

@@ -14,6 +14,10 @@ reversal, and stock counts (kiểm kê) with blind counting + atomic variance po
 + a photo path (chụp chứng từ → private storage → Gemini extraction → line-match review) that raise
 stock via one 'purchase_receipt' movement per line and create ONE pending accounting_event, all
 atomic; posted receipts are immutable (reverse appends opposite movements). Functional 10:
+reversal, and stock counts (kiểm kê) with blind counting + atomic variance posting. Functional 07: "Ghi nhận chi phí" — the expense recorder:
+quick manual/photo(Gemini)-draft → server-computed totals → atomic post (expense + payment fact +
+ONE accounting_event pending) with duplicate detection, immutable-once-posted + reversal (đảo bút
+toán). Functional 10:
 "Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat assistant over the merchant's own data.
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
@@ -132,6 +136,24 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   Pure mirror in `src/lib/receiving.ts` (unit-tested). The F5 ledger now deep-links
   `purchase_receipt` movements back to `/nhap-hang/:receiptId`. Home + Inventory expose a "Nhập hàng"
   entry; owner/manager only (server enforces).
+- **Functional 07 server (`server/f7/`, reuses F3 auth/pool/audit/errors + F5 `idem.js`):** `expenses.js`
+  is the service — `createDraft` (idempotent; source-backed dedup via ON CONFLICT on the partial index),
+  `updateDraft` (If-Match row_version), `postExpense` (atomic: recompute totals → duplicate gate →
+  payment fact snapshot → ONE accounting_event `expense_posted` pending → status posted; replays a posted
+  expense; VERSION_CONFLICT on stale expectedVersion), `reverseExpense` (status reversed + `expense_reversed`
+  event; double-reverse blocked by the events unique + status), duplicate findings + decisions.
+  Pure logic unit-tested in `test/f7-expenses.test.js`: `money.js` (server-owned totals, client total never
+  trusted), `duplicates.js` (amount + date±1 + payee-Jaccard / same-doc signals). `gemini.js`
+  (`gemini-flash-latest`, receipt photo → structured draft, AI_PREVIEW_FAILED fallback), `ai.js`
+  (persists a `source_documents` metadata row by content hash + extracts), `categories.js` (seeds the
+  GLOBAL default set once/process). Routes added to `server/f3/router.js` under
+  `/v1/merchants/:mid/{expense-categories,expenses,expenses/ai/preview,expenses/:id[,/post,/reverse,/duplicates,/duplicate-decision]}`.
+- **Functional 07 client (`src/expenses/`):** `ExpensesPage.tsx` (route `/chi-phi`, month total + status
+  filters + FAB), `ExpenseForm.tsx` (`/chi-phi/moi` — the quick flow: photo→OCR prefill, amount/lines,
+  category chips, payment picker, duplicate sheet), `ExpenseDetail.tsx` (`/chi-phi/:id` — detail + reverse
+  + duplicate-finding decisions), `parts.tsx` (StatusBadge/CategoryChips/PaymentPicker/DuplicateSheet).
+  Pure helpers in `src/lib/expenses.ts` (unit-tested). Home grid has a "Chi phí" tile; `/chi-phi/moi` and
+  `/chi-phi/:id` are `immersive` in `AppShell.tsx` (they carry a `.form-foot` CTA).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -253,6 +275,33 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   via `test/f6-setup.mjs` `ensureF6`. Not in `npm test` (`.mjs`, needs DB). NB: the pooler holds a
   txn open for a whole handler, so a killed server / abandoned fetch can leave an `idle in transaction`
   backend holding a row lock — a test artifact, not a bug (terminate it or restart the pooler).
+  `/ton-kho/doi-chieu`) keep the nav.
+- **F7 schema quirks (deployed, don't re-derive):** `public.expenses` has a NOT-NULL `created_by` and
+  a partial unique `expenses_source_uq (merchant_id, source_type, source_id) WHERE source_id IS NOT NULL`
+  (F06-source dedup; manual expenses have NULL source_id and are exempt) — but **NO `note` column**
+  (spec's note field has nowhere to persist; omitted). `accounting_events.review_status ∈ {pending,
+  reviewed,rejected}`, unique `(source_type,source_id,event_type)` (dedups post/reverse events).
+  `expense_categories (merchant_id,code)` unique treats NULL merchant_id rows as DISTINCT, so the GLOBAL
+  seed uses `INSERT … WHERE NOT EXISTS`, not ON CONFLICT (`server/f7/categories.js`). RLS on all F7 tables
+  is member-**read-only** (`private.has_merchant_role(mid,NULL)`); every write goes through the pooler
+  (F3 pattern). Storage bucket `documents` is private.
+- **F7 read-after-write must happen AFTER commit.** `getExpense` opens a fresh pool connection, so calling
+  it inside the same uncommitted `withTransaction` returns EXPENSE_NOT_FOUND — `createDraft`/`updateDraft`
+  return the id from the tx, then fetch. pg returns `date` columns as a JS Date at LOCAL midnight; use
+  `isoDate()` (local components), never `String(date).slice` (gives "Sun Aug 16") or `toISOString` (tz shift).
+- **F7 duplicate flow:** post detects candidates (posted, same grand_total, date±1, payee-Jaccard≥0.5 / same
+  doc hash) and 409s `POSSIBLE_DUPLICATE_EXPENSE` with `details.candidates` unless the body carries
+  `duplicateReview.status='NOT_DUPLICATE'`; acknowledging posts AND records `expense_duplicate_findings`
+  (open). The 409 clears the in-process idem entry, so a fresh Idempotency-Key on the ack retry is fine.
+- **F7 photo path (pilot cut):** `ai/preview` extracts via Gemini and persists a `source_documents`
+  metadata row (content hash → dedup/provenance) but does **NOT upload image bytes** to storage (server has
+  no service_role / storage write). "View original image" is therefore not wired; extraction + fallback +
+  document linkage work. Recurring/định-kỳ expenses are also out (not built).
+- **F7 live E2E:** `F7_BASE=http://localhost:<port> node --env-file=.env test/f7-e2e.mjs` (server up with
+  `.env` + a non-3000 `PORT`) runs the spec 12.3 P0 matrix (draft/totals/post/rollback/retry/source-dedup/
+  duplicate/reverse/double-reverse/RLS) on `soho-crew-test+f7@soho.test` (`test/f7-setup.mjs`
+  `ensureF7Merchant`, never a real merchant). Tests reuse the merchant, so non-dup post tests use unique
+  amounts / ack duplicates to stay stable across runs. Not in `npm test` (`.mjs`, needs DB).
 
 ## Maintaining this file
 

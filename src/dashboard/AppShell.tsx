@@ -24,6 +24,9 @@ export function AppShell() {
     // Receiving (F06): the receipt editor/detail carry their own bottom CTA; the
     // list at /nhap-hang keeps the tab bar (its FAB clears the nav).
     /^\/nhap-hang\/.+/.test(pathname);
+    // Expenses (F07): the quick form and the detail/reverse screen carry their own
+    // bottom CTA; the list at /chi-phi keeps the tab bar (its FAB clears the nav).
+    /^\/chi-phi\/.+/.test(pathname);
   return (
     <>
       <Outlet />

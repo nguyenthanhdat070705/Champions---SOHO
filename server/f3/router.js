@@ -35,6 +35,12 @@ import {
 } from "../f6/receipts.js";
 import { listSuppliers, createSupplier } from "../f6/suppliers.js";
 import { createDocument, extractDocument, getDocumentUrl } from "../f6/documents.js";
+import { listExpenseCategories } from "../f7/categories.js";
+import {
+  createDraft, updateDraft, postExpense, reverseExpense, getExpense, listExpenses,
+  listDuplicateFindings, decideDuplicate,
+} from "../f7/expenses.js";
+import { aiExpensePreview } from "../f7/ai.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -591,6 +597,86 @@ const ROUTES = [
     await requireMembership(userId, body.merchantId);
     const result = await assistantChat(query, body.merchantId, body.messages || []);
     sendJson(c.res, 200, result);
+  }],
+
+  // ── Functional 07: expenses (ghi nhận chi phí) ───────────────────────────
+  // Specific paths listed BEFORE the generic /expenses/:id so they win the match.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/expense-categories$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, { categories: await listExpenseCategories(merchantId) });
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/expenses\/ai\/preview$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await aiExpensePreview(merchantId, userId, body));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/expenses$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listExpenses(merchantId, {
+      month: sp.get("month") || undefined, status: sp.get("status") || undefined,
+      categoryId: sp.get("category") || undefined, search: sp.get("search") || undefined,
+      limit: sp.get("limit") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/expenses$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req);
+    const result = await createDraft(merchantId, userId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)\/duplicates$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listDuplicateFindings(merchantId, expenseId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)\/duplicate-decision$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await decideDuplicate(merchantId, userId, expenseId, body.findingId, body.decision));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)\/post$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await postExpense(merchantId, userId, role, expenseId, body, idemKey(c.req));
+    sendJson(c.res, (result.replayed || result.alreadyPosted) ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)\/reverse$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await reverseExpense(merchantId, userId, role, expenseId, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getExpense(merchantId, expenseId));
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/expenses\/([^/]+)$/, async (c) => {
+    const [merchantId, expenseId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const body = await readBody(c.req);
+    const ifMatchHeader = c.req.headers["if-match"];
+    const ifMatch = body.expectedVersion != null ? Number(body.expectedVersion)
+      : (ifMatchHeader != null ? Number(String(ifMatchHeader).replace(/"/g, "")) : null);
+    sendJson(c.res, 200, await updateDraft(merchantId, userId, expenseId, body, ifMatch));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────
