@@ -35,7 +35,10 @@ export function AppShell() {
     /^\/hoa-don\/[^/]+$/.test(pathname) ||
     // Cashbook (F11): the review-item resolve screen has a fixed .form-foot CTA →
     // immersive. The sổ overview, entry detail and review list keep the tab bar.
-    /^\/so-quy\/can-xem\/[^/]+$/.test(pathname);
+    /^\/so-quy\/can-xem\/[^/]+$/.test(pathname) ||
+    // Reconciliation (F12): the issue detail carries its own back nav + in-flow
+    // actions; the centre (/doi-soat) and run history (/doi-soat/lich-su) keep the tab bar.
+    (/^\/doi-soat\/[^/]+$/.test(pathname) && pathname !== "/doi-soat/lich-su");
   return (
     <>
       <Outlet />

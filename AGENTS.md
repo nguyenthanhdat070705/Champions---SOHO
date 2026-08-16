@@ -23,7 +23,10 @@ short-lived signed URLs, server-computed hash dedupe, and links to bills/expense
 Functional 11: "Sổ thu–chi tự động" — an automatic cashbook: confirmed money events (payment/refund
 success, purchase/expense accounting_events) map deterministically to one posted cashbook entry (+
 source link) when certain, or a "Cần xem" review item when not; posted lines are immutable, fixed by
-appending an opposite adjustment (đảo). Coverage/summary are computed live per period.
+appending an opposite adjustment (đảo). Coverage/summary are computed live per period. Functional 12:
+"Đối soát và xử lý sai lệch" — a deterministic reconciliation engine that detects mismatches across
+bill/payment/inventory/receipt/expense sources, materialises fingerprint-deduped issues + immutable
+evidence in one txn, and guides resolution (evidence-first; the engine never mutates source data).
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
 server**, which also hosts the pre-existing PayOS API. Specs:
@@ -215,6 +218,25 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   `ReviewItem.tsx` (`/so-quy/can-xem/:id` — fill → preview → post, immersive), `ManualDraftSheet.tsx`,
   `parts.tsx`. Pure mirror `src/lib/cashbook.ts` (unit-tested `cashbook.test.ts`). All calls via
   `src/lib/api.ts`. Home grid + reads are any member; writes owner/manager (server enforces).
+- **Functional 12 server (`server/f12/`, reuses F3 auth/pool/audit/errors):** the reconciliation
+  engine. `fingerprint.js` = pure `fingerprint(rule,ver,entityKey)` (sha256, PII-free) + `contentHash`
+  (canonical-JSON of evidence facts) — unit-tested `test/f12-rules.test.js`. `rules.js` = the
+  deterministic rule catalog (7 rules over F03/F05/F06/F07 data): each has a `detectSql` ($1=merchant,
+  $2=as_of) + a single-entity `recheckSql` ($1=merchant, $2=entityId, inlines `now()`) + a pure `map(row)`
+  → {entityKey, source, facts, deepLink}. `engine.js` = `createRun` (ONE txn: idempotent run on
+  (merchant,idem_key); per rule → fingerprint + `ON CONFLICT (merchant,fingerprint) WHERE status in
+  (active) DO NOTHING` issue upsert + content-hash-deduped evidence; verify-before-close auto-resolve of
+  active issues NOT re-detected by a clean rule; partial-coverage counters) + read-only `dryRun` (no
+  writes — used against real merchants). `issues.js` = `getSummary`/`listIssues`/`getIssue` (with live
+  recheck = snapshot-vs-now) + transitions `markReview`/`requestAction` (intent_id-idempotent handoff →
+  action_pending; F12 never mutates source data) / `ignoreIssue` (reason-gated → dismissed, suppresses
+  re-creation). Routes under `/v1/merchants/:mid/reconciliation/*` (run+resolve owner/manager, reads any
+  member). NB: router imports F12 `getSummary as getReconSummary` (name clash with F11's getSummary).
+- **Functional 12 client (`src/reconciliation/`):** `ReconciliationPage.tsx` (route `/doi-soat`, centre +
+  queue: cleanliness hero, "Chạy đối soát" run CTA, family cards, impact/status filters), `IssueDetail.tsx`
+  (`/doi-soat/:issueId`, immersive — rule callout, snapshot-vs-live evidence, guided actions, dismiss
+  sheet), `RunHistory.tsx` (`/doi-soat/lich-su`). Pure helpers `src/lib/reconciliation.ts` (unit-tested).
+  Home tile + reads any member; run/resolve owner/manager (server enforces).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -455,6 +477,28 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   on `soho-crew-test+f11@soho.test` (+ `+f11b` for RLS) via `test/f11-setup.mjs` `ensureF11` (seeds
   SYNTHETIC source rows — order+payment+refund+accounting_event — into the test tenant only). Not in
   `npm test` (`.mjs`, needs DB).
+- **F12 schema quirks (deployed, don't re-derive):** `reconciliation_candidates` does NOT exist (candidate
+  matching is out of MVP — the 4 tables are runs/issues/evidence/resolution_attempts). `reconciliation_runs.
+  status ∈ {running,completed,failed}` (partial coverage = 'completed' with per-rule errors in `counters`);
+  `reconciliation_issues.status ∈ {detected,in_review,action_pending,resolved,dismissed,failed}` with the
+  partial unique `recon_one_active_fingerprint (merchant_id,fingerprint) WHERE status in (detected,in_review,
+  action_pending,failed)` (the concurrency + dedup guard). `reconciliation_issues.run_id` FK has NO cascade
+  → delete issues BEFORE runs. Evidence is insert-only (revoke update/delete); `source_id` is a NOT-NULL uuid
+  so every rule keys on a single uuid entity. There are NO F12 DB functions — all runs are Node txns.
+- **F12 detection semantics:** a rule fires at most ONE issue per entity; rules are mutually exclusive by
+  construction (e.g. ORDER_PAID_NO_PAYMENT needs 0 captured, ORDER_PAYMENT_TOTAL_MISMATCH needs >0). Dismiss
+  is permanent suppression (NO expiry column in MVP). Auto-resolve only closes issues whose rule ran WITHOUT
+  error this run (a rule error → coverage incomplete → its issues are NOT resolved). MVP does NOT execute
+  owner commands — `requestAction` records the intent + flips to action_pending; the fix happens in the
+  owner's native flow and the NEXT run verifies-and-closes.
+- **F12 live E2E:** `PORT=<non-3000> SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
+  `F12_BASE=http://localhost:<port> node --env-file=.env test/f12-e2e.mjs` runs the spec 12.3 P0 matrix
+  (detection+impact, fingerprint dedup, run idempotency, evidence immutability, dismiss gate+suppression,
+  transitions, verify-before-close, RLS cross-tenant, dry-run no-write) on `soho-crew-test+f12@soho.test`
+  (+ `+f12b` for RLS) via `test/f12-setup.mjs` (seeds SYNTHETIC mismatches into the test tenant only).
+  `test/f12-dryrun-real.mjs` runs read-only detection over the 2 REAL merchants (logs findings, writes
+  nothing). Neither is in `npm test` (`.mjs`, needs DB). The e2e is subset-based (assumes accumulated seeds),
+  so it never asserts absolute issue totals.
 
 ## Maintaining this file
 

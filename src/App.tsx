@@ -39,6 +39,9 @@ import { CashbookPage } from "./cashbook/CashbookPage";
 import { CashbookEntry } from "./cashbook/CashbookEntry";
 import { ReviewQueue } from "./cashbook/ReviewQueue";
 import { ReviewItem } from "./cashbook/ReviewItem";
+import { ReconciliationPage } from "./reconciliation/ReconciliationPage";
+import { IssueDetail } from "./reconciliation/IssueDetail";
+import { RunHistory } from "./reconciliation/RunHistory";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -124,6 +127,9 @@ export default function App() {
             <Route path="/so-quy/can-xem" element={<ReviewQueue />} />
             <Route path="/so-quy/can-xem/:id" element={<ReviewItem />} />
             <Route path="/so-quy/:id" element={<CashbookEntry />} />
+            <Route path="/doi-soat" element={<ReconciliationPage />} />
+            <Route path="/doi-soat/lich-su" element={<RunHistory />} />
+            <Route path="/doi-soat/:issueId" element={<IssueDetail />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

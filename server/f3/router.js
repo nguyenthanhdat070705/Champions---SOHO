@@ -56,6 +56,10 @@ import {
   createManualDraft,
 } from "../f11/cashbook.js";
 import { syncMerchant } from "../f11/ingest.js";
+import { createRun, listRuns, getRun } from "../f12/engine.js";
+import {
+  getSummary as getReconSummary, listIssues, getIssue, markReview, requestAction, ignoreIssue, ruleCatalog,
+} from "../f12/issues.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -884,6 +888,7 @@ const ROUTES = [
     sendJson(c.res, 200, await updateDraft(merchantId, userId, expenseId, body, ifMatch));
   }],
 
+
   // ── Functional 11: Sổ thu–chi tự động (cashbook) ─────────────────────────
   // Reads = any ACTIVE member; writes (review/post/exclude/reverse/manual/sync)
   // = owner/manager (spec §12.1). Specific paths BEFORE the /:id catches.
@@ -978,6 +983,79 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId);
     sendJson(c.res, 200, await getReview(merchantId, reviewId));
+  }],
+
+  // ── Functional 12: reconciliation (đối soát) ─────────────────────────────
+  // Reads = any ACTIVE member; run + resolve = owner/manager (spec 12.1). More
+  // specific paths listed BEFORE the generic /issues/:id so they win the match.
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reconciliation\/runs$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createRun(merchantId, userId, { scope: body.scope, dryRun: body.dryRun === true }, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/runs$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listRuns(merchantId, { limit: c.url.searchParams.get("limit") || undefined }));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/runs\/([^/]+)$/, async (c) => {
+    const [merchantId, runId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getRun(merchantId, runId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/summary$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getReconSummary(merchantId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/rules$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, ruleCatalog());
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/issues$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listIssues(merchantId, {
+      status: sp.get("status") || undefined, family: sp.get("family") || undefined,
+      impact: sp.get("impact") || undefined, limit: sp.get("limit") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reconciliation\/issues\/([^/]+)\/review$/, async (c) => {
+    const [merchantId, issueId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await markReview(merchantId, userId, issueId, body.expectedVersion));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reconciliation\/issues\/([^/]+)\/action$/, async (c) => {
+    const [merchantId, issueId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await requestAction(merchantId, userId, issueId, body));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reconciliation\/issues\/([^/]+)\/ignore$/, async (c) => {
+    const [merchantId, issueId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await ignoreIssue(merchantId, userId, issueId, body));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reconciliation\/issues\/([^/]+)$/, async (c) => {
+    const [merchantId, issueId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getIssue(merchantId, issueId));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────

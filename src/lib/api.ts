@@ -416,6 +416,31 @@ export const api = {
     request<{ reviewId: string; status: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/cashbook/manual-drafts`, { body, idempotencyKey }),
   cashbookSync: (merchantId: string, body: { limit?: number } = {}) =>
     request<{ scanned: number; posted: number; review: number; replayed: number; skipped: number }>("POST", `/v1/merchants/${merchantId}/cashbook/sync`, { body }),
+  // ── Functional 12 reconciliation (đối soát) ────────────────────────────────
+  reconSummary: (merchantId: string) =>
+    request<ReconSummary>("GET", `/v1/merchants/${merchantId}/reconciliation/summary`),
+  reconRun: (merchantId: string, body: { scope?: unknown; dryRun?: boolean }, idempotencyKey: string) =>
+    request<{ run: ReconRun; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/reconciliation/runs`, { body, idempotencyKey }),
+  reconRuns: (merchantId: string, limit?: number) =>
+    request<{ runs: ReconRun[] }>("GET", `/v1/merchants/${merchantId}/reconciliation/runs${limit ? `?limit=${limit}` : ""}`),
+  reconRunGet: (merchantId: string, runId: string) =>
+    request<{ run: ReconRun }>("GET", `/v1/merchants/${merchantId}/reconciliation/runs/${runId}`),
+  reconIssues: (merchantId: string, params: { status?: string; family?: string; impact?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.family) qs.set("family", params.family);
+    if (params.impact) qs.set("impact", params.impact);
+    const q = qs.toString();
+    return request<{ issues: ReconIssue[] }>("GET", `/v1/merchants/${merchantId}/reconciliation/issues${q ? "?" + q : ""}`);
+  },
+  reconIssue: (merchantId: string, issueId: string) =>
+    request<ReconIssueDetail>("GET", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}`),
+  reconReview: (merchantId: string, issueId: string, expectedVersion: number) =>
+    request<ReconIssueDetail>("POST", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}/review`, { body: { expectedVersion } }),
+  reconAction: (merchantId: string, issueId: string, body: { actionType: string; intentId: string; reason?: unknown; expectedVersion?: number }) =>
+    request<ReconIssueDetail>("POST", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}/action`, { body }),
+  reconIgnore: (merchantId: string, issueId: string, body: { reasonCode: string; note?: string; intentId: string; expectedVersion?: number }) =>
+    request<ReconIssueDetail>("POST", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}/ignore`, { body }),
 };
 
 // ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──
@@ -678,4 +703,42 @@ export interface CashbookReviewPreview {
   reviewItemId: string; expectedRowVersion: number;
   preview: { direction: CashbookDirection; entryType: string; entryLabel: string; amountVnd: number; occurredAt: string; paymentMethod: CashbookMethod; ruleVersion: string; };
   impact: { direction: CashbookDirection; amountVnd: number };
+}
+
+// ── Functional 12 reconciliation ─────────────────────────────────────────────
+export type ReconImpact = "low" | "medium" | "high";
+export type ReconFamily = "missing" | "duplicate" | "amount_mismatch" | "state_mismatch" | "orphan";
+export type ReconIssueStatus = "detected" | "in_review" | "action_pending" | "resolved" | "dismissed" | "failed";
+export interface ReconDeepLink { kind: string; route: string; }
+export interface ReconIssue {
+  id: string; ruleId: string; ruleVersion?: string; family: ReconFamily; impact: ReconImpact;
+  status: ReconIssueStatus; rowVersion: number; detectedAt: string; resolvedAt: string | null; runId: string | null;
+  title: string; summary: string | null; command: string | null; actionHint: string | null; deepLink: ReconDeepLink | null;
+}
+export interface ReconEvidence {
+  id: string; sourceType: string; sourceId: string; sourceVersion: number;
+  facts: Record<string, unknown>; asOf: string; contentHash: string; maskPolicy: string; createdAt: string;
+}
+export interface ReconAttempt {
+  id: string; actionType: string; intentId: string; status: string;
+  ownerOperationId: string | null; resultRef: string | null; reason: Record<string, unknown>; actorId: string; createdAt: string;
+}
+export interface ReconLive { status: "unknown" | "cleared" | "still_mismatched"; facts: Record<string, unknown> | null; changed: boolean; }
+export interface ReconAction { type: string; label: string; hint?: string; kind?: string; }
+export interface ReconIssueDetail {
+  issue: ReconIssue; ruleExplain: string | null; evidence: ReconEvidence[]; attempts: ReconAttempt[]; live: ReconLive; actions: ReconAction[];
+}
+export interface ReconCounters {
+  ruleSetVersion?: string; rulesTotal: number; rulesOk: number; rulesFailed: number;
+  checked: number; newIssues: number; matchedIssues: number; resolved: number;
+  byFamily: Record<string, number>; byImpact: Record<string, number>; errors: { ruleId: string; message: string }[];
+}
+export interface ReconRun {
+  id: string; scope: unknown; asOf: string; ruleSetVersion: string; status: string;
+  counters: ReconCounters; createdBy: string; createdAt: string;
+}
+export interface ReconSummary {
+  active: { total: number; byFamily: Record<string, number>; byImpact: Record<string, number> };
+  resolvedTotal: number;
+  lastRun: { id: string; asOf: string; status: string; counters: ReconCounters; createdAt: string } | null;
 }
