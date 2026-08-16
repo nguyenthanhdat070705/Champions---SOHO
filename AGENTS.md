@@ -26,7 +26,12 @@ source link) when certain, or a "Cần xem" review item when not; posted lines a
 appending an opposite adjustment (đảo). Coverage/summary are computed live per period. Functional 12:
 "Đối soát và xử lý sai lệch" — a deterministic reconciliation engine that detects mismatches across
 bill/payment/inventory/receipt/expense sources, materialises fingerprint-deduped issues + immutable
-evidence in one txn, and guides resolution (evidence-first; the engine never mutates source data).
+evidence in one txn, and guides resolution (evidence-first; the engine never mutates source data). Functional 13:
+"Báo cáo kinh doanh tối giản" — immutable snapshot reports: a period builder (ngày/tuần/tháng/quý) computes
+metric rows (doanh thu gộp/thuần/hoàn, theo kênh/ngày, số bill, bill TB, top SP, chi phí theo nhóm, nhập hàng,
+hao hụt, tiền thu, kết quả tạm tính) + per-source data-quality coverage in ONE txn, content-hashed + idempotent;
+rebuild = new revision superseding the old (immutable); read screen with coverage banner, drill-down that
+reconciles to the number, period compare and CSV export.
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
 server**, which also hosts the pre-existing PayOS API. Specs:
@@ -38,6 +43,7 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
 `/home/nguye/firstmate/data/soho-f5-inventory/soho-functional-05.md`,
 `/home/nguye/firstmate/data/soho-f6-receiving/soho-functional-06.md`,
 `/home/nguye/firstmate/data/soho-f8-documents/soho-functional-08.md`,
+`/home/nguye/firstmate/data/soho-f13-reports/soho-functional-13.md`,
 `/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
 `amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy),
 `/home/nguye/firstmate/data/soho-f11-cashbook/soho-functional-11.md`.
@@ -237,6 +243,23 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   (`/doi-soat/:issueId`, immersive — rule callout, snapshot-vs-live evidence, guided actions, dismiss
   sheet), `RunHistory.tsx` (`/doi-soat/lich-su`). Pure helpers `src/lib/reconciliation.ts` (unit-tested).
   Home tile + reads any member; run/resolve owner/manager (server enforces).
+- **Functional 13 server (`server/f13/`, reuses F3 auth/pool/audit/errors + F5 `idem.js`):** `catalog.js` =
+  the PURE metric formula catalog (code-only — there is NO `report_formula_catalog` table; `FORMULA_VERSION`,
+  `METRIC_CATALOG`, period presets, scope/content hashing). `metrics.js` = the metric SQL constants + PURE
+  assemblers (`assembleSnapshot`, `coverageStatus`, `snapshotContentHash`) — DB-free so `npm test` unit-tests
+  them; the revenue window predicate MIRRORS the deployed F2 `get_today_dashboard` (paid_at window, status in
+  ('paid','refunded'), net = gross − succeeded refunds, cash/qr by method) so a same-day snapshot reconciles to
+  the đồng. `snapshots.js` = `findOrBuildSnapshot` (advisory-lock per build key → find ready or insert a new
+  revision; rebuild supersedes old, old kept immutable) / `getSnapshot` (one grouped DTO powers the whole
+  screen) / `listSnapshots` / `compareSnapshots` (compat = same tz/scope/formula/length; % null when base=0) /
+  `drilldown` (source rows bounded by the snapshot's period, sum reconciles to the metric, deep-links). `export.js`
+  = injection-safe CSV built from the immutable snapshot (parity by regeneration). Routes in `server/f3/router.js`
+  under `/v1/merchants/:mid/reports/{snapshots,snapshots/:id[,/drilldown,/exports,/exports/:eid/download],compare}`,
+  ALL gated to owner/manager (cashier can't view reports, spec 12.1).
+- **Functional 13 client (`src/reports/`):** `ReportsPage.tsx` **is** the Báo cáo screen (route `/bao-cao`,
+  period picker + tabs Tổng quan/Bán hàng/Chi phí/Dòng tiền/Tạm tính/Nguồn + coverage banner + compare/export),
+  `parts.tsx` (`CoverageChip`/`MetricCard`/`BarList` CSS bars/`DrilldownSheet`/`CompareSheet`). Pure display
+  helpers in `src/lib/reports.ts` (unit-tested). All calls via `src/lib/api.ts` (`report*`).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -499,6 +522,27 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   `test/f12-dryrun-real.mjs` runs read-only detection over the 2 REAL merchants (logs findings, writes
   nothing). Neither is in `npm test` (`.mjs`, needs DB). The e2e is subset-based (assumes accumulated seeds),
   so it never asserts absolute issue totals.
+- **F13 schema is deployed + code is the formula catalog (don't re-derive):** `report_snapshots` (build key
+  unique `(merchant_id,period_start,period_end,timezone,scope_hash,formula_version,as_of,revision)`; `created_by`
+  NOT NULL; formula_version default `VN-2026.1`), `report_snapshot_metrics` (+ `merchant_id`; unique
+  `(snapshot_id,metric_code,dimensions_hash)`; scalar rows use the empty-dims hash; `value_vnd`|`value_count`;
+  `source_ref_set_id` **nullable** → left null, drill-down resolves live bounded by the snapshot), `report_data_quality`
+  (+ `merchant_id`; free-text `status`, enforce in code), `report_exports` uses **`export_type`/`storage_path`**
+  (NO format/content_hash/expires_at/export_scope cols). **`report_formula_catalog` does NOT exist** — the catalog
+  lives in `server/f13/catalog.js`. Status values used: building/ready/failed/superseded. RLS is ON but reports go
+  through the pooler (like F3–F8); the Node `requireMembership(owner|manager)` is the tenant guard.
+- **F13 CSV export is streamed, not stored (pilot cut):** the `documents` bucket is image-mime-only, so CSV can't
+  be uploaded there without a migration. `POST …/exports` records a `report_exports` audit row and `GET
+  …/exports/:eid/download` REGENERATES the CSV from the immutable snapshot (parity + hash stability by
+  construction) and streams it (BOM + `Content-Disposition`). PDF and signed-URL object storage are post-pilot.
+- **F13 estimate = net revenue − posted operating expenses** (founder decision); inventory purchases (F06) are
+  shown SEPARATELY and NOT subtracted; damage (F05 `damage_writeoff`) is count+qty only (no COGS/value). Coverage
+  is first-class: bills-without-line-items make `sales_top_products`/`order_items` partial|unavailable, NEVER 0.
+  Both real merchants have ~856 paid bills with 0 line items → top-products is `unavailable` there (expected).
+- **F13 live E2E:** `node --env-file=.env test/f13-e2e.mjs` (needs DB + Supabase auth; NOT in `npm test`) seeds a
+  deterministic today on `soho-crew-test+f13@soho.test`, then checks hand-computed metrics, **same-day snapshot ==
+  `get_today_dashboard`**, coverage gap, immutable rebuild→revision, drill-down sum parity, compat compare, CSV
+  parity and cross-tenant block. Pure logic is unit-tested in `test/f13-reports.test.js` (in `npm test`).
 
 ## Maintaining this file
 

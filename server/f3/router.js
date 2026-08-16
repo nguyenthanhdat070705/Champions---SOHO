@@ -60,6 +60,10 @@ import { createRun, listRuns, getRun } from "../f12/engine.js";
 import {
   getSummary as getReconSummary, listIssues, getIssue, markReview, requestAction, ignoreIssue, ruleCatalog,
 } from "../f12/issues.js";
+import {
+  findOrBuildSnapshot, getSnapshot, listSnapshots, compareSnapshots, drilldown,
+} from "../f13/snapshots.js";
+import { createExport, getExportFile } from "../f13/export.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -1056,6 +1060,67 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId);
     sendJson(c.res, 200, await getIssue(merchantId, issueId));
+  }],
+
+  // ── Functional 13: Báo cáo kinh doanh (snapshot reports) ─────────────────
+  // reports.read = owner/manager only (spec 12.1 — thu ngân không xem báo cáo).
+  // Specific sub-paths first; the generic /snapshots/:sid GET is anchored so it
+  // never shadows /drilldown or /exports (all regexes end with $).
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await listSnapshots(merchantId, { limit: c.url.searchParams.get("limit") || undefined }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await findOrBuildSnapshot(merchantId, userId, body, idemKey(c.req));
+    sendJson(c.res, 200, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reports\/compare$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await compareSnapshots(merchantId, body.baseId, body.compareId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots\/([^/]+)\/drilldown$/, async (c) => {
+    const [merchantId, snapshotId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await drilldown(merchantId, snapshotId, {
+      metric: sp.get("metric") || undefined, date: sp.get("date") || undefined,
+      channel: sp.get("channel") || undefined, categoryId: sp.get("categoryId"),
+      productId: sp.get("productId") || undefined, limit: sp.get("limit") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots\/([^/]+)\/exports$/, async (c) => {
+    const [merchantId, snapshotId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 201, await createExport(merchantId, userId, snapshotId, body.exportType || "csv"));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots\/([^/]+)\/exports\/([^/]+)\/download$/, async (c) => {
+    const [merchantId, snapshotId, exportId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const file = await getExportFile(merchantId, snapshotId, exportId);
+    c.res.setHeader("Content-Type", file.contentType);
+    c.res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    c.res.setHeader("Cache-Control", "no-store");
+    c.res.statusCode = 200;
+    c.res.end(file.csv);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/reports\/snapshots\/([^/]+)$/, async (c) => {
+    const [merchantId, snapshotId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await getSnapshot(merchantId, snapshotId));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────

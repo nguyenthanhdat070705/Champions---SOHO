@@ -79,6 +79,13 @@ export async function fetchText(path: string): Promise<string> {
   return res.text();
 }
 
+/** Fetch an authenticated file (e.g. a report CSV) as a Blob for download. */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const res = await fetch(path, { headers: await authHeader() });
+  if (!res.ok) throw new ApiError("INTERNAL", "Không tải được tệp.", res.status);
+  return res.blob();
+}
+
 // ── Typed API surface ────────────────────────────────────────────────────────
 export interface ApiProduct {
   id: string; name: string; sku: string | null; barcode: string | null;
@@ -441,6 +448,27 @@ export const api = {
     request<ReconIssueDetail>("POST", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}/action`, { body }),
   reconIgnore: (merchantId: string, issueId: string, body: { reasonCode: string; note?: string; intentId: string; expectedVersion?: number }) =>
     request<ReconIssueDetail>("POST", `/v1/merchants/${merchantId}/reconciliation/issues/${issueId}/ignore`, { body }),
+
+  // ── Functional 13 reports ────────────────────────────────────────────────────
+  reportBuild: (merchantId: string, body: ReportBuildInput, idempotencyKey?: string) =>
+    request<ReportBuildResult>("POST", `/v1/merchants/${merchantId}/reports/snapshots`, { body, idempotencyKey }),
+  reportList: (merchantId: string, limit = 40) =>
+    request<{ snapshots: ReportListItem[] }>("GET", `/v1/merchants/${merchantId}/reports/snapshots?limit=${limit}`),
+  reportGet: (merchantId: string, snapshotId: string) =>
+    request<ReportSnapshotDto>("GET", `/v1/merchants/${merchantId}/reports/snapshots/${snapshotId}`),
+  reportDrilldown: (merchantId: string, snapshotId: string, params: { metric: string; date?: string; channel?: string; categoryId?: string; productId?: string; limit?: number }) => {
+    const qs = new URLSearchParams({ metric: params.metric });
+    if (params.date) qs.set("date", params.date);
+    if (params.channel) qs.set("channel", params.channel);
+    if (params.categoryId) qs.set("categoryId", params.categoryId);
+    if (params.productId) qs.set("productId", params.productId);
+    if (params.limit) qs.set("limit", String(params.limit));
+    return request<ReportDrilldown>("GET", `/v1/merchants/${merchantId}/reports/snapshots/${snapshotId}/drilldown?${qs.toString()}`);
+  },
+  reportCompare: (merchantId: string, baseId: string, compareId: string) =>
+    request<ReportCompare>("POST", `/v1/merchants/${merchantId}/reports/compare`, { body: { baseId, compareId } }),
+  reportCreateExport: (merchantId: string, snapshotId: string) =>
+    request<ReportExportResult>("POST", `/v1/merchants/${merchantId}/reports/snapshots/${snapshotId}/exports`, { body: { exportType: "csv" } }),
 };
 
 // ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──
@@ -450,6 +478,43 @@ export type EInvoiceEligibleOrder = EligibleOrder;
 export type EInvoiceValidateResult = ValidateResult;
 export type { InvoiceBuyer };
 export interface EInvoiceBuyerInput { kind: "individual" | "organization"; name?: string | null; taxCode?: string | null; address?: string | null; email?: string | null; }
+
+// ── Functional 13 report types (mirror the server DTO) ───────────────────────
+export type Coverage = "complete" | "partial" | "unavailable";
+export interface ReportBuildInput { preset?: "day" | "week" | "month" | "quarter"; period?: { start: string; end: string }; timezone?: string; scope?: Record<string, unknown>; rebuild?: boolean; }
+export interface ReportSnapshotHeader {
+  id: string; merchantId: string; periodStart: string; periodEnd: string; periodLabel: string;
+  timezone: string; scope: unknown; scopeHash: string; formulaVersion: string; asOf: string | null;
+  status: string; revision: number; supersedesId: string | null; contentHash: string | null;
+  createdAt: string | null; isLatest: boolean; newer: { id: string; revision: number } | null;
+}
+export interface ReportSales {
+  grossVnd: number; refundVnd: number; netVnd: number; billCount: number; billAvgVnd: number;
+  byChannel: { channel: string; label: string; netVnd: number }[];
+  byDay: { date: string; netVnd: number }[];
+  topProducts: { rank: number; name: string; productId: string | null; revenueVnd: number; qty: number }[];
+  topCoverage: Coverage;
+}
+export interface ReportExpense { totalVnd: number; byCategory: { categoryId: string | null; categoryName: string; totalVnd: number }[]; coverage: Coverage; }
+export interface ReportInventory { purchaseVnd: number; damageCount: number; damageQty: number; }
+export interface ReportCashflow { cashCollectedVnd: number; expensePaidVnd: number; deltaVnd: number; }
+export interface ReportEstimate { valueVnd: number; coverage: Coverage; formula: string; disclosures: string[]; }
+export interface ReportCoverageSource { sourceType: string; label: string; expected: number; processed: number; openIssues: number; status: Coverage; freshnessAt: string | null; affectedMetrics: string[]; }
+export interface ReportCoverage { overall: Coverage; percent: number; sources: ReportCoverageSource[]; notes: string[]; }
+export interface ReportSnapshotDto {
+  snapshot: ReportSnapshotHeader;
+  sections: { sales: ReportSales; expense: ReportExpense; inventory: ReportInventory; cashflow: ReportCashflow; estimate: ReportEstimate };
+  coverage: ReportCoverage;
+  metrics: { code: string; label: string; valueVnd: number | null; valueCount: number | null; dimensions: Record<string, unknown>; coverage: Coverage }[];
+}
+export interface ReportBuildResult { snapshot: ReportSnapshotDto; ready: boolean; created: boolean; revision: number; }
+export interface ReportListItem { id: string; periodStart: string; periodEnd: string; periodLabel: string; timezone: string; scopeHash: string; formulaVersion: string; asOf: string | null; status: string; revision: number; contentHash: string | null; createdAt: string | null; netVnd: number | null; days: number; }
+export interface ReportDrilldownRow { id: string; label: string; at?: string | null; amountVnd?: number; qty?: number; route: string | null; }
+export interface ReportDrilldown { metric: string; label: string; totalVnd: number; totalCount: number; rows: ReportDrilldownRow[]; truncated: boolean; }
+export interface ReportCompareRow { code: string; label: string; valueType: "vnd" | "count"; baseValue: number; compareValue: number; delta: number; pct: number | null; }
+export interface ReportCompareHeader { id: string; periodLabel: string; periodStart: string; periodEnd: string; asOf: string | null; revision: number; }
+export interface ReportCompare { compatible: boolean; reasons?: string[]; base: ReportCompareHeader; compare: ReportCompareHeader; rows?: ReportCompareRow[]; }
+export interface ReportExportResult { id: string; snapshotId: string; exportType: string; status: string; replayed: boolean; downloadPath: string; }
 
 // ── AI Assistant (Functional 10) ─────────────────────────────────────────────
 export interface ChatTurn { role: "user" | "assistant"; content: string; }
