@@ -648,6 +648,23 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   A stale/garbage previewHash at lock → 409. Coverage watermark constrains ONLY the processed (receipts
   `received_at`) side, never the expected side. CSV export is stored as an `accounting_exports` row +
   regenerated-and-hash-verified on download (no bucket object / signed URL — a documented pilot cut).
+- **F15 revenue is booked from the verified PAYMENT at order-total granularity — NOT from `order_items`.**
+  A payment.succeeded → one sổ-doanh-thu record for the whole `payments.amount` (+ a quỹ/ngân-hàng line by
+  method), so bills with NO line items (bills cũ không có chi tiết dòng) are captured fully; the revenue
+  record carries `dimensions.detail='order_total'` to label that provenance honestly (mirrors F13 coverage).
+  Basis == F02/F13, so sổ doanh thu reconciles to the đồng.
+- **F15 `syncRange` (server/f15/ingest.js) is BATCHED + CHUNKED, not per-event.** The old sync did ~7
+  sequential pooler round-trips PER source inside ONE transaction, so a real merchant (~450 sources over the
+  high-latency pooler) ran for many minutes and never committed → 0 rows (the captain bug). It now loads the
+  pending set, then ingests in 200-event chunks; each chunk is ONE txn of set-based multi-row inserts (receipts
+  → records → record_sources, linked by the per-record `content_hash`, which embeds the receipt id so it is
+  unique in a batch) and commits independently (durable partial progress). A chunk that throws is reported in
+  the response `{failed, errors[]}` (HTTP 200, never silently swallowed) and the rest still run; the client
+  surfaces partial failure. `ingestEventTx` is unchanged and still used by the F3 post-commit hooks (single
+  event). Idempotency is the load-time `not exists` filter + the receipt unique, so a replay re-scans nothing.
+- **F15 itemless-sync regression:** `node --env-file=.env test/f15-itemless-sync-e2e.mjs` seeds 250 bills
+  WITHOUT `order_items` on `soho-crew-test+fix2@soho.test`, syncs, and asserts 100% coverage + hand-math
+  revenue + `order_total` labels + idempotent replay. Not in `npm test` (`.mjs`, needs DB).
 - **F15 live E2E:** `PORT=3015 SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
   `F15_BASE=http://localhost:3015 node --env-file=.env test/f15-e2e.mjs` runs the spec 12.3 P0 matrix
   (record-build dedupe, sổ doanh thu == payments−refunds parity, book totals, book→source drill, preview/

@@ -121,67 +121,193 @@ export async function ingestEventTx(client, merchantId, ev) {
   return { decision: records.length ? "mapped" : "skipped", receiptId, recordIds };
 }
 
+/** Load every not-yet-ingested confirmed source event in [from,to], normalized. */
+async function loadPendingEvents(merchantId, from, to, lim) {
+  const tsStart = from ? `${from}T00:00:00+07:00` : "1970-01-01T00:00:00+07:00";
+  const tsEnd = to ? `${addDays(to, 1)}T00:00:00+07:00` : "2999-01-01T00:00:00+07:00";
+  const payments = await query(
+    `select p.id, p.method, p.amount, p.paid_at from public.payments p
+      where p.merchant_id=$1 and p.status='succeeded' and p.paid_at>=$2 and p.paid_at<$3
+        and not exists (select 1 from public.accounting_source_receipts r
+           where r.merchant_id=p.merchant_id and r.source_type='payment'
+             and r.source_id=p.id and r.event_type='payment.succeeded')
+      order by p.paid_at asc limit $4`, [merchantId, tsStart, tsEnd, lim]);
+  const refunds = await query(
+    `select r.id, r.method, r.amount, r.refunded_at from public.payment_refunds r
+      where r.merchant_id=$1 and r.status='succeeded' and r.refunded_at>=$2 and r.refunded_at<$3
+        and not exists (select 1 from public.accounting_source_receipts sr
+           where sr.merchant_id=r.merchant_id and sr.source_type='refund'
+             and sr.source_id=r.id and sr.event_type='refund.succeeded')
+      order by r.refunded_at asc limit $4`, [merchantId, tsStart, tsEnd, lim]);
+  const expenses = await query(
+    `select ae.id, ae.source_id, ae.amount_vnd, ae.created_at, e.expense_date
+       from public.accounting_events ae join public.expenses e on e.id=ae.source_id
+      where ae.merchant_id=$1 and ae.event_type='expense_posted'
+        and e.expense_date>=$2::date and e.expense_date<=$3::date
+        and not exists (select 1 from public.accounting_source_receipts r
+           where r.merchant_id=ae.merchant_id and r.source_type='expense'
+             and r.source_id=ae.source_id and r.event_type='expense_posted')
+      order by e.expense_date asc limit $4`,
+    [merchantId, from || "1970-01-01", to || "2999-01-01", lim]);
+  const purchases = await query(
+    `select ae.id, ae.source_id, ae.amount_vnd, ae.created_at, pr.received_at
+       from public.accounting_events ae join public.purchase_receipts pr on pr.id=ae.source_id
+      where ae.merchant_id=$1 and ae.event_type='purchase_received'
+        and pr.received_at>=$2::date and pr.received_at<=$3::date
+        and not exists (select 1 from public.accounting_source_receipts r
+           where r.merchant_id=ae.merchant_id and r.source_type='purchase_receipt'
+             and r.source_id=ae.source_id and r.event_type='purchase_received')
+      order by pr.received_at asc limit $4`,
+    [merchantId, from || "1970-01-01", to || "2999-01-01", lim]);
+  return [
+    ...payments.rows.map(paymentEvent),
+    ...refunds.rows.map(refundEvent),
+    ...expenses.rows.map(expenseEvent),
+    ...purchases.rows.map(purchaseEvent),
+  ];
+}
+
+/**
+ * Ingest a BATCH of normalized events in ONE transaction using set-based inserts
+ * (a handful of round-trips for the whole chunk instead of ~7 per event). The
+ * per-event `ingestEventTx` is still used by the post-commit hooks; this is its
+ * bulk equivalent for the on-demand sync. All events passed in are pre-filtered to
+ * have no receipt yet, so receipts insert with ON CONFLICT DO NOTHING (a conflict
+ * is a rare concurrent double-run → counted as replayed, never a second record).
+ */
+async function ingestBatchTx(merchantId, evs) {
+  const out = { mapped: 0, replayed: 0, skipped: 0, records: 0 };
+  if (!evs.length) return out;
+  return withTransaction(async (client) => {
+    // 1) Bulk-insert source receipts; RETURNING tells us which actually inserted.
+    const rcv = [];
+    const rcvParams = [];
+    evs.forEach((ev, i) => {
+      const b = i * 6; // 6 bound params per row ('1' + 'received' are literals)
+      const payloadHash = contentHash({
+        t: ev.sourceType, id: ev.sourceId, e: ev.sourceEventType,
+        a: Math.trunc(Number(ev.amountVnd) || 0), d: ev.businessDate, m: ev.method || null,
+      });
+      rcv.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},'1',$${b + 5},$${b + 6},'received')`);
+      rcvParams.push(merchantId, ev.sourceType, ev.sourceId, ev.sourceEventType, payloadHash,
+        ev.occurredAt || new Date().toISOString());
+    });
+    const insR = await client.query(
+      `insert into public.accounting_source_receipts
+         (merchant_id, source_type, source_id, event_type, source_version, payload_hash, occurred_at, status)
+       values ${rcv.join(",")}
+       on conflict (merchant_id, source_type, source_id, event_type, source_version) do nothing
+       returning id, source_type, source_id, event_type`, rcvParams);
+    // Map natural key → new receipt id. Events not returned lost a concurrent race.
+    const receiptOf = new Map();
+    for (const r of insR.rows) receiptOf.set(`${r.source_type}:${r.source_id}:${r.event_type}`, r.id);
+
+    // 2) Map each freshly-inserted receipt to its book records (pure, in-memory).
+    const recRows = [];        // { receiptId, bookCode, recordType, businessDate, amountVnd, dimensions, contentHash }
+    const mappedReceiptIds = [];
+    const reviewReceiptIds = [];
+    const attentionDates = new Set();
+    for (const ev of evs) {
+      const receiptId = receiptOf.get(`${ev.sourceType}:${ev.sourceId}:${ev.sourceEventType}`);
+      if (!receiptId) { out.replayed++; continue; }
+      const records = mapSourceToRecords(ev);
+      if (!records.length) { out.skipped++; reviewReceiptIds.push(receiptId); continue; }
+      out.mapped++;
+      mappedReceiptIds.push(receiptId);
+      if (ev.businessDate) attentionDates.add(ev.businessDate);
+      for (const r of records) {
+        const ch = contentHash({ book: r.bookCode, type: r.recordType, date: r.businessDate,
+          amount: r.amountVnd, dims: r.dimensions, receipt: receiptId });
+        recRows.push({ receiptId, ...r, contentHash: ch });
+      }
+    }
+
+    // 3) Bulk-insert records; RETURNING (id, content_hash) links each back to its
+    //    receipt (content_hash is unique in a batch — it embeds book+receipt).
+    if (recRows.length) {
+      const receiptOfHash = new Map(recRows.map((r) => [r.contentHash, r.receiptId]));
+      const vals = [];
+      const params = [];
+      recRows.forEach((r, i) => {
+        const b = i * 8;
+        vals.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6}::jsonb,'posted',$${b + 7},$${b + 8})`);
+        params.push(merchantId, r.recordType, r.bookCode, r.businessDate, r.amountVnd,
+          JSON.stringify(r.dimensions), RULE_VERSION, r.contentHash);
+      });
+      const insRec = await client.query(
+        `insert into public.accounting_records
+           (merchant_id, record_type, book_code, business_date, amount_vnd, dimensions, status, rule_version, content_hash)
+         values ${vals.join(",")} returning id, content_hash`, params);
+      out.records += insRec.rows.length;
+
+      // 4) Bulk-insert record→source links.
+      const linkVals = [];
+      const linkParams = [];
+      insRec.rows.forEach((row, i) => {
+        const b = i * 2;
+        linkVals.push(`($${b + 1},$${b + 2},'primary')`);
+        linkParams.push(row.id, receiptOfHash.get(row.content_hash));
+      });
+      await client.query(
+        `insert into public.accounting_record_sources (record_id, source_receipt_id, relation)
+         values ${linkVals.join(",")}`, linkParams);
+    }
+
+    // 5) Flip receipt statuses in bulk (mapped vs review).
+    if (mappedReceiptIds.length) {
+      await client.query(
+        `update public.accounting_source_receipts set status='mapped' where id = any($1::uuid[])`,
+        [mappedReceiptIds]);
+    }
+    if (reviewReceiptIds.length) {
+      await client.query(
+        `update public.accounting_source_receipts set status='review' where id = any($1::uuid[])`,
+        [reviewReceiptIds]);
+    }
+
+    // 6) Late source into an already-locked period → attention (§4.3 / ATD-12).
+    if (attentionDates.size) {
+      await client.query(
+        `update public.accounting_periods p
+            set status='attention', row_version=row_version+1
+          where p.merchant_id=$1 and p.status='locked'
+            and exists (select 1 from unnest($2::date[]) d
+                          where d >= p.period_start and d <= p.period_end)`,
+        [merchantId, [...attentionDates]]);
+    }
+    return out;
+  });
+}
+
 /**
  * On-demand rebuild-sync for a date range (spec brief: "rebuild-sync for a
  * period"). Scans confirmed source rows in [from,to] that have no receipt yet and
- * ingests each. Safe to run repeatedly. Returns per-decision counts.
+ * ingests them in bounded, batched chunks. Safe to run repeatedly and idempotent
+ * (the not-yet-ingested filter + receipt unique). Each chunk commits on its own so
+ * a large merchant makes durable partial progress instead of one multi-minute
+ * transaction that never commits (the real F15 sync bug). A chunk that throws is
+ * reported in `errors` and `failed` — never silently swallowed (FR-03 honesty) —
+ * and the remaining chunks still run. Returns per-decision counts + any errors.
  */
 export async function syncRange(merchantId, { from, to, limit = 5000 } = {}) {
   const lim = Math.min(Math.max(Number(limit) || 5000, 1), 20000);
-  const counts = { scanned: 0, mapped: 0, replayed: 0, skipped: 0, records: 0 };
-  const tsStart = from ? `${from}T00:00:00+07:00` : "1970-01-01T00:00:00+07:00";
-  const tsEnd = to ? `${addDays(to, 1)}T00:00:00+07:00` : "2999-01-01T00:00:00+07:00";
-
-  await withTransaction(async (client) => {
-    const payments = await client.query(
-      `select p.id, p.method, p.amount, p.paid_at from public.payments p
-        where p.merchant_id=$1 and p.status='succeeded' and p.paid_at>=$2 and p.paid_at<$3
-          and not exists (select 1 from public.accounting_source_receipts r
-             where r.merchant_id=p.merchant_id and r.source_type='payment'
-               and r.source_id=p.id and r.event_type='payment.succeeded')
-        order by p.paid_at asc limit $4`, [merchantId, tsStart, tsEnd, lim]);
-    const refunds = await client.query(
-      `select r.id, r.method, r.amount, r.refunded_at from public.payment_refunds r
-        where r.merchant_id=$1 and r.status='succeeded' and r.refunded_at>=$2 and r.refunded_at<$3
-          and not exists (select 1 from public.accounting_source_receipts sr
-             where sr.merchant_id=r.merchant_id and sr.source_type='refund'
-               and sr.source_id=r.id and sr.event_type='refund.succeeded')
-        order by r.refunded_at asc limit $4`, [merchantId, tsStart, tsEnd, lim]);
-    const expenses = await client.query(
-      `select ae.id, ae.source_id, ae.amount_vnd, ae.created_at, e.expense_date
-         from public.accounting_events ae join public.expenses e on e.id=ae.source_id
-        where ae.merchant_id=$1 and ae.event_type='expense_posted'
-          and e.expense_date>=$2::date and e.expense_date<=$3::date
-          and not exists (select 1 from public.accounting_source_receipts r
-             where r.merchant_id=ae.merchant_id and r.source_type='expense'
-               and r.source_id=ae.source_id and r.event_type='expense_posted')
-        order by e.expense_date asc limit $4`,
-      [merchantId, from || "1970-01-01", to || "2999-01-01", lim]);
-    const purchases = await client.query(
-      `select ae.id, ae.source_id, ae.amount_vnd, ae.created_at, pr.received_at
-         from public.accounting_events ae join public.purchase_receipts pr on pr.id=ae.source_id
-        where ae.merchant_id=$1 and ae.event_type='purchase_received'
-          and pr.received_at>=$2::date and pr.received_at<=$3::date
-          and not exists (select 1 from public.accounting_source_receipts r
-             where r.merchant_id=ae.merchant_id and r.source_type='purchase_receipt'
-               and r.source_id=ae.source_id and r.event_type='purchase_received')
-        order by pr.received_at asc limit $4`,
-      [merchantId, from || "1970-01-01", to || "2999-01-01", lim]);
-
-    const evs = [
-      ...payments.rows.map(paymentEvent),
-      ...refunds.rows.map(refundEvent),
-      ...expenses.rows.map(expenseEvent),
-      ...purchases.rows.map(purchaseEvent),
-    ];
-    for (const ev of evs) {
-      counts.scanned++;
-      const r = await ingestEventTx(client, merchantId, ev);
-      if (r.decision === "mapped") { counts.mapped++; counts.records += r.recordIds.length; }
-      else if (r.decision === "replayed") counts.replayed++;
-      else counts.skipped++;
+  const counts = { scanned: 0, mapped: 0, replayed: 0, skipped: 0, records: 0, failed: 0, errors: [] };
+  const evs = await loadPendingEvents(merchantId, from, to, lim);
+  const CHUNK = 200; // events per transaction — keeps each txn well under any timeout
+  for (let i = 0; i < evs.length; i += CHUNK) {
+    const chunk = evs.slice(i, i + CHUNK);
+    counts.scanned += chunk.length;
+    try {
+      const r = await ingestBatchTx(merchantId, chunk);
+      counts.mapped += r.mapped; counts.replayed += r.replayed;
+      counts.skipped += r.skipped; counts.records += r.records;
+    } catch (e) {
+      counts.failed += chunk.length;
+      const msg = e?.message || String(e);
+      if (counts.errors.length < 10) counts.errors.push(msg);
+      console.error("F15 syncRange chunk failed", msg);
     }
-  });
+  }
   return counts;
 }
 

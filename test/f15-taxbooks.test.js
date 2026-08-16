@@ -17,6 +17,9 @@ describe("F15 mapping — source → book records", () => {
     const cash = recs.find((r) => r.bookCode === "cash_book");
     assert.equal(rev.amountVnd, 100000);
     assert.equal(rev.dimensions.channel, "cash");
+    // Revenue is booked at order-total granularity (bills cũ không có chi tiết dòng),
+    // so the record is labelled honestly for coverage (mirrors F13).
+    assert.equal(rev.dimensions.detail, "order_total");
     assert.equal(cash.amountVnd, 100000);
     assert.equal(cash.recordType, "cash");
   });

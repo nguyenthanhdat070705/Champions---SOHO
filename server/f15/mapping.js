@@ -95,7 +95,12 @@ export function mapSourceToRecords(ev) {
 
   switch (key) {
     case "payment:payment.succeeded": {
-      const out = [rec("sales_revenue", "revenue", date, amount, { flow: "sale", channel })];
+      // Revenue is booked from the verified PAYMENT at order-total granularity —
+      // SoHo has no per-line breakdown for these bills (bills cũ không có chi tiết
+      // dòng), so the record carries `detail:'order_total'` to label its provenance
+      // honestly (mirrors F13 coverage: order-total, not line-item). This is the
+      // net revenue basis F02/F13 use, so sổ doanh thu reconciles to the đồng.
+      const out = [rec("sales_revenue", "revenue", date, amount, { flow: "sale", channel, detail: "order_total" })];
       if (channel === "cash") out.push(rec("cash_book", "cash", date, amount, { flow: "receipt", channel }));
       else if (channel === "bank") out.push(rec("bank_book", "bank", date, amount, { flow: "receipt", channel }));
       return out;

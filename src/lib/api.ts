@@ -507,7 +507,7 @@ export const api = {
   taxCatalog: (merchantId: string) =>
     request<TaxCatalog>("GET", `/v1/merchants/${merchantId}/accounting/catalog`),
   taxSync: (merchantId: string, body: { from?: string; to?: string } = {}) =>
-    request<{ scanned: number; mapped: number; replayed: number; skipped: number; records: number }>("POST", `/v1/merchants/${merchantId}/accounting/sync`, { body }),
+    request<{ scanned: number; mapped: number; replayed: number; skipped: number; records: number; failed?: number; errors?: string[] }>("POST", `/v1/merchants/${merchantId}/accounting/sync`, { body }),
   taxBookLedger: (merchantId: string, bookCode: string, params: { period?: string; snapshotId?: string } = {}) => {
     const qs = new URLSearchParams();
     if (params.snapshotId) qs.set("snapshotId", params.snapshotId);

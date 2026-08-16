@@ -46,8 +46,13 @@ export function TaxBooksPage() {
     try {
       const [y, m] = period.split("-");
       const from = period.includes("Q") ? `${y}-01-01` : `${y}-${m}-01`;
-      await api.taxSync(merchantId, { from, to: undefined });
+      const res = await api.taxSync(merchantId, { from, to: undefined });
       await load();
+      // Partial failure is reported, never swallowed (FR-03): some sources were
+      // ingested, but a chunk failed — show it so the merchant can retry.
+      if (res.failed && res.failed > 0) {
+        setErr(`Đã đồng bộ ${res.records} dòng, nhưng còn ${res.failed} nguồn chưa vào được sổ. Vui lòng bấm đồng bộ lại.${res.errors?.length ? ` (${res.errors[0]})` : ""}`);
+      }
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Đồng bộ thất bại.");
     } finally { setSyncing(false); }
@@ -97,8 +102,14 @@ export function TaxBooksPage() {
               </div>
               {!cov?.complete && (
                 <p className="field__hint" style={{ marginTop: 8 }}>
-                  Còn {cov?.missing} nguồn chưa vào sổ.{canWrite ? " Bấm nút đồng bộ ở góc trên để cập nhật." : ""}
+                  Còn {cov?.missing} nguồn chưa vào sổ.{canWrite ? "" : " Nhờ chủ/quản lý đồng bộ để cập nhật."}
                 </p>
+              )}
+              {canWrite && !cov?.complete && (
+                <button className="btn btn--primary" onClick={onSync} disabled={syncing}
+                  style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%" }}>
+                  <IconRefresh size={18} /> {syncing ? "Đang đồng bộ…" : "Đồng bộ sổ"}
+                </button>
               )}
               {data.lateCount > 0 && (
                 <p className="field__hint" style={{ marginTop: 8, color: "var(--amber-700, #b8862f)" }}>
