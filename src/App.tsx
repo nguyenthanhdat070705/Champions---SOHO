@@ -46,6 +46,10 @@ import { RunHistory } from "./reconciliation/RunHistory";
 import { ClosingPage } from "./closing/ClosingPage";
 import { ClosingDraft } from "./closing/ClosingDraft";
 import { ClosingDetail } from "./closing/ClosingDetail";
+import { TaxBooksPage } from "./taxbooks/TaxBooksPage";
+import { TaxBookLedger } from "./taxbooks/TaxBookLedger";
+import { TaxLockPreview } from "./taxbooks/TaxLockPreview";
+import { TaxPackage } from "./taxbooks/TaxPackage";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -137,6 +141,10 @@ export default function App() {
             <Route path="/chot-tien" element={<ClosingPage />} />
             <Route path="/chot-tien/moi" element={<ClosingDraft />} />
             <Route path="/chot-tien/:id" element={<ClosingDetail />} />
+            <Route path="/so-sach" element={<TaxBooksPage />} />
+            <Route path="/so-sach/khoa" element={<TaxLockPreview />} />
+            <Route path="/so-sach/so/:bookCode" element={<TaxBookLedger />} />
+            <Route path="/so-sach/goi/:snapshotId" element={<TaxPackage />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

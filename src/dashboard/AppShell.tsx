@@ -42,7 +42,10 @@ export function AppShell() {
     // Closing (F14): the close flow (/chot-tien/moi) and the confirmed detail
     // (/chot-tien/:id) carry a fixed .form-foot CTA → immersive; the list at
     // /chot-tien keeps the tab bar.
-    /^\/chot-tien\/.+/.test(pathname);
+    /^\/chot-tien\/.+/.test(pathname) ||
+    // Tax books (F15): the lock preview has a fixed .form-foot CTA → immersive. The
+    // overview, book ledger and package screens keep the tab bar.
+    pathname === "/so-sach/khoa";
   return (
     <>
       <Outlet />

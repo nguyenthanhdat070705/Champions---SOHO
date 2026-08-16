@@ -130,6 +130,19 @@ export function TaxPage() {
           <IconChevron size={18} />
         </button>
 
+        <button
+          className="card"
+          style={{ display: "flex", gap: 14, alignItems: "center", width: "100%", textAlign: "left" }}
+          onClick={() => nav("/so-sach")}
+        >
+          <div className="list-row__ic"><IconShield size={20} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="list-row__t">Sổ kế toán & dữ liệu thuế</div>
+            <div className="list-row__d">Sổ theo TT 152/2025, khóa kỳ và gói dữ liệu thuế có nguồn (chuẩn bị, chưa phải tờ khai).</div>
+          </div>
+          <IconChevron size={18} />
+        </button>
+
         <Banner kind="info">
           Bạn có thể cập nhật tình trạng thuế bất cứ lúc nào trong mục Cài đặt.
           SoHo sẽ hướng dẫn khi có thêm dữ liệu.

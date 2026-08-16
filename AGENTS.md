@@ -280,6 +280,30 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   (`/chot-tien/:id` — confirmed revision + history + late-source attention + "Chốt lại", immersive),
   `parts.tsx`. Pure mirror `src/lib/closing.ts` (unit-tested `closing.test.ts`). Home grid "Chốt ngày"
   tile. Reads any member; writes owner/manager (server enforces).
+- **Functional 15 server (`server/f15/`, reuses F3 auth/pool/audit/errors + F5 idem/deterministicUuid):**
+  "SỔ KẾ TOÁN & DỮ LIỆU THUẾ" — TT 152/2025 books from real events. `mapping.js` is the PURE compliance
+  core (unit-tested `test/f15-taxbooks.test.js`): the 5-book S-HKD retail set (sales_revenue/cash_book/
+  bank_book/expenses/materials_goods), `mapSourceToRecords` (deterministic source→signed-amount book lines;
+  a payment → revenue + cash/bank by method; expense/purchase have NO method so NOT split into quỹ/ngân
+  hàng), `computeThresholdSplit` (1-tỷ cumulative/year, GTGT 1% + TNCN 0,5% on the over-threshold part),
+  `toCsv`/`byteHash` (BOM+CRLF, VND bare int, deterministic), `contentHash` (canonical-JSON sha256).
+  `catalog.js` seeds the ONE published `compliance_catalog_versions` row (`VN-HKD-2026.1`, legal_basis →
+  TT152/NĐ141/NĐ117) lazily+idempotently. `ingest.js` = record builder: `ingestEventTx` (source receipt
+  ON CONFLICT DO NOTHING gate → map → records + record_sources, all one txn; a late source into a locked
+  period flips it to `attention`) + `syncRange` (on-demand rebuild-sync). `books.js` = book totals/ledger/
+  record detail (watermark-pinnable). `periods.js` = get/create period (month `YYYY-MM` / quarter
+  `YYYY-Qn`), coverage, overview, `previewLock`/`lockPeriod` (immutable versioned snapshot; content hash is
+  over the FROZEN RECORD SET, NOT asOf, so re-preview is stable and a late record → genuine v2 with
+  `previous_snapshot_id`). `packages.js` = tax data package (revenue by channel + threshold split, each line
+  source-indexed). `exports.js` = deterministic CSV artifact + `accounting_exports` row + regenerate-and-
+  verify-hash download. Routes in `server/f3/router.js` under `/v1/merchants/:mid/{accounting/*,tax-data/*}`
+  (F15 aliases `getAcctSnapshot`/`listAcctSnapshots`/`createAcctExport` to avoid the F13 snapshot/export clash).
+- **Functional 15 client (`src/taxbooks/`):** `TaxBooksPage.tsx` (route `/so-sach` — period chips, coverage
+  hero, revenue, 5 book cards, lock CTA, snapshot list, sync), `TaxBookLedger.tsx` (`/so-sach/so/:bookCode`),
+  `TaxLockPreview.tsx` (`/so-sach/khoa`, immersive `.form-foot` — preview + responsibility + lock),
+  `TaxPackage.tsx` (`/so-sach/goi/:snapshotId` — snapshot + package lines + disclaimer + CSV export/download).
+  Types/methods in `src/lib/api.ts` (`tax*`). Home grid "Sổ sách" tile + Thuế-page entry; reads any member,
+  sync/lock/export owner/manager (server enforces).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -593,6 +617,34 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   test tenant only). Not in `npm test` (`.mjs`, needs DB). NB: cold requests pay ~7s Supabase
   auth+pooler TLS warmup, so run the e2e as a background job (don't cut it off at a short timeout); a
   `pkill -f test/f14-e2e.mjs` self-matches its own shell — kill by pid instead.
+- **F15 schema quirks (deployed, don't re-derive):** `accounting_records` has BOTH `book_code` (NOT NULL,
+  the real book key F15 uses) AND a nullable `book_definition_id` (left NULL — there is NO
+  `catalog_definitions` table, so the book/field/rule catalog lives in `server/f15/mapping.js`, not the DB).
+  `amount_vnd` is a SIGNED bigint (refunds/expenses stored negative → a book total is a plain SUM; sổ doanh
+  thu nets to F02/F13). `accounting_source_receipts` creation time is **`received_at`** (NOT `created_at` —
+  that column is `accounting_records`'). There is **NO** `accounting_period_record_links` table: a snapshot's
+  frozen record set is defined by the watermark rule (posted records in [start,end] with
+  `created_at <= source_watermark.asOf`); integrity is the record-fingerprint content hash stored in
+  `source_watermark`. `accounting_period_snapshots` + `tax_data_package_lines` each carry a NOT-NULL
+  `merchant_id` (easy to miss). `accounting_exports` has NO unique index (idempotency = look up existing by
+  (merchant, snapshot, object_key) + matching content_hash). All F15 access is server-only via the pooler +
+  `requireMembership` (no RLS relied upon). No F15 DB functions — Node txns (F3 pattern).
+- **F15 lock semantics:** the preview/snapshot content hash is over the FROZEN RECORD SET (period + rule/
+  catalog version + record fingerprint + book totals), deliberately NOT over `asOf` — so re-previewing an
+  unchanged period returns the same hash (lock replays the current snapshot, no spurious v2), while a late
+  source changes the fingerprint → a genuine restatement v2 (`previous_snapshot_id` chain, v1 immutable).
+  A stale/garbage previewHash at lock → 409. Coverage watermark constrains ONLY the processed (receipts
+  `received_at`) side, never the expected side. CSV export is stored as an `accounting_exports` row +
+  regenerated-and-hash-verified on download (no bucket object / signed URL — a documented pilot cut).
+- **F15 live E2E:** `PORT=3015 SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
+  `F15_BASE=http://localhost:3015 node --env-file=.env test/f15-e2e.mjs` runs the spec 12.3 P0 matrix
+  (record-build dedupe, sổ doanh thu == payments−refunds parity, book totals, book→source drill, preview/
+  lock + replay, stale-hash 409, package 1-tỷ threshold split hand-verified + deterministic, deterministic
+  CSV export + BOM, late-source → attention → re-lock v2 chained + v1 immutable, RLS, catalog published) on
+  `soho-crew-test+f15@soho.test` (+ `+f15b` for RLS) via `test/f15-setup.mjs` `ensureF15` (seeds SYNTHETIC
+  June 900M + July 220c/100qr/−20 sources crossing the threshold). The e2e `cleanup()`s F15 rows on the
+  test tenant at start so it is re-runnable. Not in `npm test` (`.mjs`, needs DB). **Verified LIVE green:
+  12/12 + browser walkthrough (Thuế → /so-sach → books → v2 snapshot package with exact split → CSV export).**
 
 ## Maintaining this file
 

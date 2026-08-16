@@ -499,6 +499,40 @@ export const api = {
     request<ClosingConfirmResult>("POST", `/v1/merchants/${merchantId}/closing-drafts/${draftId}/confirm`, { body, idempotencyKey }),
   closingResolveAttention: (merchantId: string, attentionId: string, body: { decision: "dismissed"; note?: string }) =>
     request<{ attentionId: string; status: string; openRemaining?: number }>("POST", `/v1/merchants/${merchantId}/closing-attention/${attentionId}/resolve`, { body }),
+  // ── Functional 15 sổ kế toán & dữ liệu thuế ────────────────────────────────
+  taxAccountingOverview: (merchantId: string, period?: string) =>
+    request<TaxOverview>("GET", `/v1/merchants/${merchantId}/accounting/overview${period ? `?period=${period}` : ""}`),
+  taxCatalog: (merchantId: string) =>
+    request<TaxCatalog>("GET", `/v1/merchants/${merchantId}/accounting/catalog`),
+  taxSync: (merchantId: string, body: { from?: string; to?: string } = {}) =>
+    request<{ scanned: number; mapped: number; replayed: number; skipped: number; records: number }>("POST", `/v1/merchants/${merchantId}/accounting/sync`, { body }),
+  taxBookLedger: (merchantId: string, bookCode: string, params: { period?: string; snapshotId?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.snapshotId) qs.set("snapshotId", params.snapshotId);
+    else if (params.period) qs.set("period", params.period);
+    const q = qs.toString();
+    return request<TaxBookLedger>("GET", `/v1/merchants/${merchantId}/accounting/books/${bookCode}${q ? "?" + q : ""}`);
+  },
+  taxRecord: (merchantId: string, recordId: string) =>
+    request<TaxRecordDetail>("GET", `/v1/merchants/${merchantId}/accounting/records/${recordId}`),
+  taxPeriodPreview: (merchantId: string, period: string) =>
+    request<TaxLockPreview>("POST", `/v1/merchants/${merchantId}/accounting/periods/preview`, { body: { period } }),
+  taxPeriodLock: (merchantId: string, body: { period: string; previewHash: string; asOf: string; responsibilityConfirmed: boolean }, idempotencyKey: string) =>
+    request<{ snapshotId: string; versionNo: number; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/accounting/periods/lock`, { body, idempotencyKey }),
+  taxSnapshots: (merchantId: string, period?: string) =>
+    request<TaxSnapshotList>("GET", `/v1/merchants/${merchantId}/accounting/snapshots${period ? `?period=${period}` : ""}`),
+  taxSnapshot: (merchantId: string, snapshotId: string) =>
+    request<{ snapshot: TaxSnapshot }>("GET", `/v1/merchants/${merchantId}/accounting/snapshots/${snapshotId}`),
+  taxBuildPackage: (merchantId: string, snapshotId: string, idempotencyKey: string) =>
+    request<{ packageId: string; replayed: boolean; contentHash: string }>("POST", `/v1/merchants/${merchantId}/tax-data/packages`, { body: { snapshotId }, idempotencyKey }),
+  taxPackage: (merchantId: string, packageId: string) =>
+    request<TaxPackageResult>("GET", `/v1/merchants/${merchantId}/tax-data/packages/${packageId}`),
+  taxCreateExport: (merchantId: string, body: { snapshotId: string; scope: TaxExportScope; format?: string }) =>
+    request<{ exportId: string; objectKey: string; contentHash: string; format: string; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/accounting/exports`, { body }),
+  taxListExports: (merchantId: string, snapshotId: string) =>
+    request<{ exports: TaxExport[] }>("GET", `/v1/merchants/${merchantId}/accounting/snapshots/${snapshotId}/exports`),
+  taxExportDownloadUrl: (merchantId: string, exportId: string) =>
+    `/v1/merchants/${merchantId}/accounting/exports/${exportId}/download`,
 };
 
 // ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──
@@ -837,3 +871,37 @@ export interface ReconSummary {
   resolvedTotal: number;
   lastRun: { id: string; asOf: string; status: string; counters: ReconCounters; createdAt: string } | null;
 }
+
+// ── Functional 15 sổ kế toán & dữ liệu thuế ───────────────────────────────────
+export type TaxPeriodStatus = "open" | "review" | "locked" | "attention";
+export interface TaxCoverage {
+  expected: number; processed: number; missing: number; failed: number; pct: number; complete: boolean;
+  bySource: Record<string, { expected: number; processed: number }>;
+}
+export interface TaxBookRow { code: string; name: string; short: string; legalRef: string; order: number; count: number; total: number; grossIn: number; grossOut: number; }
+export interface TaxPeriodState { id: string; key: string; kind: string; label: string; start: string; end: string; timezone: string; status: TaxPeriodStatus; rowVersion: number; currentSnapshotId: string | null; currentVersionNo: number | null; }
+export interface TaxOverview {
+  period: TaxPeriodState; catalog: { code: string; ruleVersion: string };
+  coverage: TaxCoverage; books: TaxBookRow[]; revenueVnd: number; lateCount: number;
+  canLock: boolean; ruleVersion: string; asOf: string;
+}
+export interface TaxCatalog { id: string; code: string; status: string; scopeCode: string; ruleVersion: string; effectiveFrom: string; effectiveTo: string; legalBasis: { disclaimer?: string; sources: { code: string; title: string; url?: string; note?: string }[] }; contentHash: string; publishedAt: string | null; }
+export interface TaxBookLine { id: string; recordType: string; businessDate: string; amountVnd: number; dimensions: Record<string, unknown>; status: string; ruleVersion: string; description: string; source: { sourceType: string; sourceId: string; label: string; route: string | null } | null; }
+export interface TaxBookLedger { book: { code: string; name: string; short: string; legalRef: string }; period: { key: string; label: string; start: string; end: string; timezone: string }; lines: TaxBookLine[]; total: number; count: number; ruleVersion: string; }
+export interface TaxRecordDetail { record: { id: string; recordType: string; bookCode: string; bookName: string; bookShort: string; businessDate: string; amountVnd: number; dimensions: Record<string, unknown>; status: string; ruleVersion: string; contentHash: string; description: string; createdAt: string }; sources: { relation: string; sourceType: string; sourceId: string; label: string; route: string | null; occurredAt: string | null; status: string }[]; replaces: { id: string; amountVnd: number } | null; }
+export interface TaxLockPreview {
+  periodId: string; period: { key: string; label: string; start: string; end: string; timezone: string };
+  asOf: string; previewHash: string; versionNo: number; isRestatement: boolean;
+  bookTotals: { code: string; total: number; count: number }[]; revenueVnd: number; recordCount: number;
+  coverage: TaxCoverage; blocking: { code: string; severity: string; message: string; count?: number }[];
+  warnings: { code: string; severity: string; message: string }[]; canLock: boolean; ruleVersion: string; catalogCode: string;
+}
+export interface TaxSnapshot { id: string; periodId: string; versionNo: number; periodStart: string; periodEnd: string; timezone: string; asOf: string | null; watermark: unknown; coverage: TaxCoverage; contentHash: string; ruleVersion: string; catalogCode: string; lockedBy: string; lockedAt: string; previousSnapshotId: string | null; isCurrent: boolean; books: { code: string; total: number; count: number }[]; }
+export interface TaxSnapshotList { period: TaxPeriodState; snapshots: { id: string; versionNo: number; asOf: string | null; recordCount: number | null; coverage: TaxCoverage; contentHash: string; ruleVersion: string; lockedBy: string; lockedAt: string; previousSnapshotId: string | null; isCurrent: boolean }[]; }
+export interface TaxPackageLine { code: string; sequenceNo: number; label: string; amountVnd: number | null; legalNote: string | null; sourceIndex: Record<string, unknown>; }
+export interface TaxPackageResult {
+  package: { id: string; snapshotId: string; definitionCode: string; definitionVersion: string; status: string; coverage: TaxCoverage; totals: Record<string, number> & { channels?: Record<string, number> }; contentHash: string; catalogCode: string; ruleVersion: string; createdAt: string };
+  lines: TaxPackageLine[]; disclaimer: string;
+}
+export type TaxExportScope = { kind: "all_books" } | { kind: "book"; bookCode: string } | { kind: "package" };
+export interface TaxExport { id: string; format: string; formatVersion: string; objectKey: string; contentHash: string; createdAt: string; }

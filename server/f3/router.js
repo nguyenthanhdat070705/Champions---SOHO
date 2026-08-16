@@ -68,6 +68,17 @@ import {
   prepareClosing, getDraft, saveCount, previewClosing, confirmClosing,
   listClosings, getClosing, getRevisions, scanLateSources, resolveAttention,
 } from "../f14/service.js";
+// F15 aliases the snapshot/export names that clash with F13's above.
+import {
+  getOverview, previewLock, lockPeriod,
+  listSnapshots as listAcctSnapshots, getSnapshot as getAcctSnapshot,
+} from "../f15/periods.js";
+import { bookLedger, recordDetail } from "../f15/books.js";
+import { syncRange } from "../f15/ingest.js";
+import { getCatalog } from "../f15/catalog.js";
+import { buildPackage, getPackage } from "../f15/packages.js";
+import { createExport as createAcctExport, listExports, getExportContent } from "../f15/exports.js";
+import { resolvePeriod } from "../f15/period-util.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -1191,6 +1202,119 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
     sendJson(c.res, 200, await resolveAttention(merchantId, userId, attentionId, await readBody(c.req)));
+  }],
+
+  // ── Functional 15: Sổ kế toán & dữ liệu thuế ─────────────────────────────
+  // Reads = any ACTIVE member; sync/preview/lock/build/export = owner/manager
+  // (spec §12.1). Specific paths listed BEFORE generic /:id catches. NB: F15
+  // snapshot/export helpers are aliased (getAcctSnapshot/…) to avoid the F13 clash.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/overview$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getOverview(merchantId, c.url.searchParams.get("period") || undefined));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/catalog$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getCatalog());
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/accounting\/sync$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await syncRange(merchantId, { from: body.from, to: body.to, limit: body.limit }));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/snapshots$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listAcctSnapshots(merchantId, c.url.searchParams.get("period") || undefined));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/snapshots\/([^/]+)\/exports$/, async (c) => {
+    const [merchantId, snapshotId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listExports(merchantId, snapshotId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/snapshots\/([^/]+)$/, async (c) => {
+    const [merchantId, snapshotId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getAcctSnapshot(merchantId, snapshotId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/accounting\/periods\/preview$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await previewLock(merchantId, body.period));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/accounting\/periods\/lock$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await lockPeriod(merchantId, userId, body.period, body, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/books\/([^/]+)$/, async (c) => {
+    const [merchantId, bookCode] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    let period, watermark;
+    const snapshotId = sp.get("snapshotId");
+    if (snapshotId) {
+      const snap = await getAcctSnapshot(merchantId, snapshotId);
+      period = resolvePeriod(snap.snapshot.periodStart.slice(0, 7));
+      period = { ...period, start: snap.snapshot.periodStart, end: snap.snapshot.periodEnd, label: period.label };
+      watermark = snap.snapshot.asOf;
+    } else {
+      period = resolvePeriod(sp.get("period") || undefined);
+    }
+    sendJson(c.res, 200, await bookLedger(merchantId, bookCode, period, { watermark, limit: sp.get("limit") || undefined }));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/records\/([^/]+)$/, async (c) => {
+    const [merchantId, recordId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await recordDetail(merchantId, recordId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/accounting\/exports$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await createAcctExport(merchantId, userId, { snapshotId: body.snapshotId, scope: body.scope, format: body.format });
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/accounting\/exports\/([^/]+)\/download$/, async (c) => {
+    const [merchantId, exportId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const a = await getExportContent(merchantId, userId, exportId);
+    c.res.setHeader("Content-Type", a.contentType);
+    c.res.setHeader("Cache-Control", "no-store");
+    c.res.setHeader("Content-Disposition", `attachment; filename="${a.filename}"`);
+    c.res.statusCode = 200;
+    c.res.end(a.body);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/tax-data\/packages$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    const result = await buildPackage(merchantId, userId, body.snapshotId, idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/tax-data\/packages\/([^/]+)$/, async (c) => {
+    const [merchantId, packageId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getPackage(merchantId, packageId));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────
