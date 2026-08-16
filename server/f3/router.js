@@ -64,6 +64,10 @@ import {
   findOrBuildSnapshot, getSnapshot, listSnapshots, compareSnapshots, drilldown,
 } from "../f13/snapshots.js";
 import { createExport, getExportFile } from "../f13/export.js";
+import {
+  prepareClosing, getDraft, saveCount, previewClosing, confirmClosing,
+  listClosings, getClosing, getRevisions, scanLateSources, resolveAttention,
+} from "../f14/service.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -1121,6 +1125,72 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
     sendJson(c.res, 200, await getSnapshot(merchantId, snapshotId));
+  }],
+
+  // ── Functional 14: Chốt tiền cuối ngày (end-of-day cash closing) ─────────
+  // Reads = any ACTIVE member; writes (prepare/count/preview/confirm/scan/
+  // resolve) = owner/manager (spec §12.1). Specific paths BEFORE /:id catches.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/closings$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listClosings(merchantId, { from: sp.get("from") || undefined, to: sp.get("to") || undefined }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closings\/prepare$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 201, await prepareClosing(merchantId, userId, await readBody(c.req)));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/closings\/([^/]+)\/revisions$/, async (c) => {
+    const [merchantId, closingId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getRevisions(merchantId, closingId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closings\/([^/]+)\/attention\/scan$/, async (c) => {
+    const [merchantId, closingId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await scanLateSources(merchantId, userId, closingId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/closings\/([^/]+)$/, async (c) => {
+    const [merchantId, closingId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getClosing(merchantId, closingId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/closing-drafts\/([^/]+)$/, async (c) => {
+    const [merchantId, draftId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getDraft(merchantId, draftId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closing-drafts\/([^/]+)\/counts$/, async (c) => {
+    const [merchantId, draftId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 201, await saveCount(merchantId, userId, draftId, await readBody(c.req)));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closing-drafts\/([^/]+)\/preview$/, async (c) => {
+    const [merchantId, draftId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await previewClosing(merchantId, draftId, await readBody(c.req)));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closing-drafts\/([^/]+)\/confirm$/, async (c) => {
+    const [merchantId, draftId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await confirmClosing(merchantId, userId, draftId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/closing-attention\/([^/]+)\/resolve$/, async (c) => {
+    const [merchantId, attentionId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await resolveAttention(merchantId, userId, attentionId, await readBody(c.req)));
   }],
 
   // ── Dev-only PayOS webhook simulator (spec brief G12) ────────────────────

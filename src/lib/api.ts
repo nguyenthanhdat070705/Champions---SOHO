@@ -6,6 +6,10 @@
 // the Vite dev proxy forwards /v1 to the combined server.
 import { supabase } from "./supabase";
 import type { Invoice, InvoiceListItem, EligibleOrder, ValidateResult, InvoiceBuyer } from "./einvoice";
+import type {
+  ClosingListResult, DraftDetail, ClosingDetail, ClosingRevision, ClosingAttentionItem,
+  ClosingPreview, ClosingConfirmResult, CountMode,
+} from "./closing";
 
 export class ApiError extends Error {
   code: string;
@@ -469,6 +473,32 @@ export const api = {
     request<ReportCompare>("POST", `/v1/merchants/${merchantId}/reports/compare`, { body: { baseId, compareId } }),
   reportCreateExport: (merchantId: string, snapshotId: string) =>
     request<ReportExportResult>("POST", `/v1/merchants/${merchantId}/reports/snapshots/${snapshotId}/exports`, { body: { exportType: "csv" } }),
+  // ── Functional 14 chốt tiền cuối ngày (end-of-day cash closing) ─────────────
+  closingsList: (merchantId: string, params: { from?: string; to?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return request<ClosingListResult>("GET", `/v1/merchants/${merchantId}/closings${q ? "?" + q : ""}`);
+  },
+  closingPrepare: (merchantId: string, businessDate?: string) =>
+    request<DraftDetail>("POST", `/v1/merchants/${merchantId}/closings/prepare`, { body: { businessDate } }),
+  closingGet: (merchantId: string, closingId: string) =>
+    request<ClosingDetail>("GET", `/v1/merchants/${merchantId}/closings/${closingId}`),
+  closingRevisions: (merchantId: string, closingId: string) =>
+    request<{ revisions: ClosingRevision[] }>("GET", `/v1/merchants/${merchantId}/closings/${closingId}/revisions`),
+  closingScanLate: (merchantId: string, closingId: string) =>
+    request<{ detected: number; open?: number; status?: string; items: ClosingAttentionItem[] }>("POST", `/v1/merchants/${merchantId}/closings/${closingId}/attention/scan`, { body: {} }),
+  closingDraftGet: (merchantId: string, draftId: string) =>
+    request<DraftDetail>("GET", `/v1/merchants/${merchantId}/closing-drafts/${draftId}`),
+  closingSaveCount: (merchantId: string, draftId: string, body: { clientCountId: string; mode: CountMode; countedTotalVnd?: number; denominations?: { denominationVnd: number; quantity: number }[] }) =>
+    request<DraftDetail>("POST", `/v1/merchants/${merchantId}/closing-drafts/${draftId}/counts`, { body }),
+  closingPreview: (merchantId: string, draftId: string, body: { countVersion?: number; reasonCode?: string | null; reasonNote?: string | null } = {}) =>
+    request<ClosingPreview>("POST", `/v1/merchants/${merchantId}/closing-drafts/${draftId}/preview`, { body }),
+  closingConfirm: (merchantId: string, draftId: string, body: { previewHash: string; countVersion: number; reasonCode?: string | null; reasonNote?: string | null; responsibilityConfirmed: boolean }, idempotencyKey: string) =>
+    request<ClosingConfirmResult>("POST", `/v1/merchants/${merchantId}/closing-drafts/${draftId}/confirm`, { body, idempotencyKey }),
+  closingResolveAttention: (merchantId: string, attentionId: string, body: { decision: "dismissed"; note?: string }) =>
+    request<{ attentionId: string; status: string; openRemaining?: number }>("POST", `/v1/merchants/${merchantId}/closing-attention/${attentionId}/resolve`, { body }),
 };
 
 // ── Functional 09 e-invoice (types from lib/einvoice, re-aliased for the API) ──

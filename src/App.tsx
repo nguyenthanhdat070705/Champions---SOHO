@@ -43,6 +43,9 @@ import { ReviewItem } from "./cashbook/ReviewItem";
 import { ReconciliationPage } from "./reconciliation/ReconciliationPage";
 import { IssueDetail } from "./reconciliation/IssueDetail";
 import { RunHistory } from "./reconciliation/RunHistory";
+import { ClosingPage } from "./closing/ClosingPage";
+import { ClosingDraft } from "./closing/ClosingDraft";
+import { ClosingDetail } from "./closing/ClosingDetail";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -131,6 +134,9 @@ export default function App() {
             <Route path="/doi-soat" element={<ReconciliationPage />} />
             <Route path="/doi-soat/lich-su" element={<RunHistory />} />
             <Route path="/doi-soat/:issueId" element={<IssueDetail />} />
+            <Route path="/chot-tien" element={<ClosingPage />} />
+            <Route path="/chot-tien/moi" element={<ClosingDraft />} />
+            <Route path="/chot-tien/:id" element={<ClosingDetail />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

@@ -260,6 +260,26 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   period picker + tabs Tổng quan/Bán hàng/Chi phí/Dòng tiền/Tạm tính/Nguồn + coverage banner + compare/export),
   `parts.tsx` (`CoverageChip`/`MetricCard`/`BarList` CSS bars/`DrilldownSheet`/`CompareSheet`). Pure display
   helpers in `src/lib/reports.ts` (unit-tested). All calls via `src/lib/api.ts` (`report*`).
+- **Functional 14 server (`server/f14/`, reuses F3 auth/pool/audit/errors + F5 idem/deterministicUuid):**
+  "Chốt tiền cuối ngày" (end-of-day cash closing). `closing.js` is PURE (unit-tested
+  `test/f14-closing.test.js`): `computeCount` (server-authoritative total/denomination math),
+  `expectedCash` (Σ in − Σ out; direction never inferred from sign), variance/reason gates, and the
+  `sourceSetHash`/`previewHash`/`contentHash` that make confirm idempotent + previews staleness-safe.
+  `service.js` is the txn service: `prepareClosing` (create-or-reuse the active draft + freeze cash
+  source snapshots; re-preparing a confirmed closing opens a NEW draft = the re-close path),
+  `saveCount` (independent versions, idempotent on client_count_id), `previewClosing` (recompute +
+  drift-check → 409 CLOSING_SOURCE_CHANGED), `confirmClosing` (atomic revision + pointer + audit +
+  outbox; deterministic revision id = `deterministicUuid('f14-closing-revision:'+draftId)` so a
+  double-tap replays the SAME revision), `scanLateSources`/`resolveAttention` (late cash after cut-off
+  → attention item, dismiss or re-close). Routes wired into `server/f3/router.js` under
+  `/v1/merchants/:mid/{closings,closings/prepare,closings/:id[,/revisions,/attention/scan],
+  closing-drafts/:id[,/counts,/preview,/confirm],closing-attention/:id/resolve}`.
+- **Functional 14 client (`src/closing/`):** `ClosingPage.tsx` (route `/chot-tien`, list + "Két hôm
+  nay khớp chưa?" hero — keeps nav), `ClosingDraft.tsx` (`/chot-tien/moi?date=` — prepare→count
+  (total|mệnh giá)→variance→reason→preview→consent→confirm, immersive), `ClosingDetail.tsx`
+  (`/chot-tien/:id` — confirmed revision + history + late-source attention + "Chốt lại", immersive),
+  `parts.tsx`. Pure mirror `src/lib/closing.ts` (unit-tested `closing.test.ts`). Home grid "Chốt ngày"
+  tile. Reads any member; writes owner/manager (server enforces).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -543,6 +563,36 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   deterministic today on `soho-crew-test+f13@soho.test`, then checks hand-computed metrics, **same-day snapshot ==
   `get_today_dashboard`**, coverage gap, immutable rebuild→revision, drill-down sum parity, compat compare, CSV
   parity and cross-tenant block. Pure logic is unit-tested in `test/f13-reports.test.js` (in `npm test`).
+- **F14 schema quirks (deployed, don't re-derive):** NO `locations` table → `daily_closings` is unique
+  `(merchant_id, business_date)` (single-location MVP, no location_id anywhere). NO `closing_previews`
+  table and NO DB functions → the preview is built in-memory and bound by a `preview_hash` the confirm
+  echoes. NO `cash_count_lines` table → denomination lines live in `cash_counts.denomination_lines`
+  jsonb. NO immutability trigger on `closing_revisions` (verified) → a confirmed revision is immutable
+  by APPLICATION rule only (there is NO update/delete endpoint; fixes = a new revision), like F11.
+  `closing_revisions.variance_vnd` is a GENERATED column; `closing_attention_items.status ∈
+  open|resolved|dismissed`, unique `(revision_id, source_fingerprint)`. All F14 access is server-only
+  via the pooler (F3 pattern); clients have no write grants.
+- **F14 expected cash (MVP cut):** expected = Σ(cash payments succeeded) − Σ(cash refunds succeeded)
+  in the business-day window (`server/f14/service.js loadCashSources`, reuses the F2 window math + the
+  `payments_dashboard_idx`/`refunds_dashboard_idx` partial indexes → sub-ms). Opening float and F07/F11
+  cash movements are OUT of the pilot (documented cut) — add them as more source loaders. QR is
+  reference-only, never in the drawer. cut_off is server now(); a source is "late" by set-difference
+  (a cash source in the window not in ANY draft snapshot of the closing), NOT by a received_at>cut_off
+  scan. Re-close resolves open attention items (`decision='reclosed'`).
+- **F14 confirm invariants:** confirm requires `Idempotency-Key` + `previewHash` + `responsibilityConfirmed`.
+  It recomputes the live `sourceSetHash` (drift since prepare → 409 CLOSING_SOURCE_CHANGED) and the
+  `previewHash` from what it will write (mismatch → 409 CLOSING_PREVIEW_STALE); a non-zero variance
+  needs a reason (`other` needs a note → 422). runIdempotent's OUTER replayed flag must be merged into
+  the returned result (the cached inner result carries `replayed:false` from the first run).
+- **F14 live E2E:** `PORT=3014 SOHO_DEV_ENDPOINTS=1 node --env-file=.env server/index.js &` then
+  `F14_BASE=http://localhost:3014 node --env-file=.env test/f14-e2e.mjs` runs the spec 12.3 P0 matrix
+  (expected formula + QR-excluded, denomination server-total, balanced/short confirm + reason gate,
+  double-tap idempotent, source-drift 409, late-source attention + re-close chain + rev-1 immutability,
+  RLS cross-tenant) on `soho-crew-test+f14@soho.test` (+ `+f14b` for RLS) via `test/f14-setup.mjs`
+  `ensureF14` + `seedCashDay`/`cleanClosingDay` (SYNTHETIC orders/payments/refunds on fixed past dates,
+  test tenant only). Not in `npm test` (`.mjs`, needs DB). NB: cold requests pay ~7s Supabase
+  auth+pooler TLS warmup, so run the e2e as a background job (don't cut it off at a short timeout); a
+  `pkill -f test/f14-e2e.mjs` self-matches its own shell — kill by pid instead.
 
 ## Maintaining this file
 

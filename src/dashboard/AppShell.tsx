@@ -38,7 +38,11 @@ export function AppShell() {
     /^\/so-quy\/can-xem\/[^/]+$/.test(pathname) ||
     // Reconciliation (F12): the issue detail carries its own back nav + in-flow
     // actions; the centre (/doi-soat) and run history (/doi-soat/lich-su) keep the tab bar.
-    (/^\/doi-soat\/[^/]+$/.test(pathname) && pathname !== "/doi-soat/lich-su");
+    (/^\/doi-soat\/[^/]+$/.test(pathname) && pathname !== "/doi-soat/lich-su") ||
+    // Closing (F14): the close flow (/chot-tien/moi) and the confirmed detail
+    // (/chot-tien/:id) carry a fixed .form-foot CTA → immersive; the list at
+    // /chot-tien keeps the tab bar.
+    /^\/chot-tien\/.+/.test(pathname);
   return (
     <>
       <Outlet />
