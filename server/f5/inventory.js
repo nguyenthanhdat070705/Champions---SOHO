@@ -113,6 +113,9 @@ function mapMovementRow(r) {
     case "count_session":
       if (r.count_session_id) source = { kind: "count", label: r.count_session_name, route: `/ton-kho/kiem-kho/${r.count_session_id}` };
       break;
+    case "purchase_receipt":
+      if (r.receipt_id) source = { kind: "receipt", label: r.receipt_number, route: `/nhap-hang/${r.receipt_id}` };
+      break;
     case "product":
       source = { kind: "opening", label: null, route: null };
       break;
@@ -143,6 +146,7 @@ const LEDGER_SELECT = `
          o.id as order_id, o.order_number,
          sr.return_number, sro.id as return_order_id,
          cs.id as count_session_id, cs.name as count_session_name,
+         pr.id as receipt_id, pr.receipt_number,
          prof.full_name as actor_name,
          exists (select 1 from public.inventory_movements rv
                   where rv.original_movement_id = m.id and rv.movement_type = 'reversal') as reversed
@@ -153,6 +157,7 @@ const LEDGER_SELECT = `
     left join public.sales_returns sr on sr.id = sri.return_id
     left join public.orders sro on sro.id = sr.order_id
     left join public.inventory_count_sessions cs on m.reference_type = 'count_session' and cs.id = m.reference_id
+    left join public.purchase_receipts pr on m.reference_type = 'purchase_receipt' and pr.id = m.reference_id
     left join public.profiles prof on prof.user_id = m.created_by`;
 
 /** GET /inventory/:productId — header + ledger timeline + reconciliation flag. */

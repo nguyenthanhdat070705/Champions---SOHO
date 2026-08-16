@@ -2174,3 +2174,33 @@ select.input {
 .count-done { text-align: center; padding: 24px 16px; }
 .count-done__ic { width: 58px; height: 58px; border-radius: 50%; background: var(--teal); display: grid; place-items: center; margin: 0 auto 12px; }
 .count-done__t { font-size: 18px; font-weight: 800; color: var(--ink); margin-bottom: 4px; }
+
+/* ── Functional 06: NHẬP HÀNG (receiving) ─────────────────────────────────── */
+.rcpt-total { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rcpt-total span { color: var(--muted); font-size: 13px; }
+.rcpt-total b { font-size: 20px; font-weight: 800; color: var(--ink); }
+
+.rcpt-line { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.rcpt-line__main { flex: 1; min-width: 0; }
+.rcpt-line__total { font-weight: 700; font-size: 14px; color: var(--ink); white-space: nowrap; }
+.rcpt-line__del { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: transparent; color: var(--muted); flex: none; }
+.rcpt-line__del:hover { background: var(--danger-050); color: var(--danger); }
+.rcpt-line--warn { border: 1px solid var(--amber); background: var(--amber-050); }
+
+.rcpt-review__desc { font-weight: 600; font-size: 14px; color: var(--ink); }
+
+.rcpt-impact { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.rcpt-impact__main { flex: 1; min-width: 0; }
+.rcpt-impact__ba { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.rcpt-impact__arrow { color: var(--teal-700); font-size: 12px; font-weight: 700; }
+.rcpt-impact__after { font-size: 16px; font-weight: 800; color: var(--ink); }
+
+/* Sticky totals + CTA bar for the editor (sits above the safe area). */
+.rcpt-foot { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.rcpt-foot__totals { margin-bottom: 8px; }
+.rcpt-foot__row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
+.rcpt-foot__row b { color: var(--ink); font-weight: 700; }
+.rcpt-foot__row--grand { font-size: 15px; margin-top: 2px; }
+.rcpt-foot__row--grand b { font-size: 18px; font-weight: 800; }
+/* The editor scroll area must clear the taller sticky foot (totals + CTA). */
+.rcpt-scroll { padding-bottom: 156px; }

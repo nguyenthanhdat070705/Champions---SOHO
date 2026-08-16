@@ -42,6 +42,19 @@ export const ERROR_STATUS = {
   COUNT_NOT_FOUND: 404,
   COUNT_ALREADY_POSTED: 409,
   COUNT_INVALID_STATE: 409,
+  // Receiving (Functional 06, spec 5 / 10.1)
+  RECEIPT_NOT_FOUND: 404,
+  RECEIPT_NO_LINES: 400,
+  RECEIPT_INVALID_STATE: 409,
+  RECEIPT_ALREADY_POSTED: 409,
+  RECEIPT_DUPLICATE_PRODUCT: 409,
+  RECEIPT_REVERSE_NEGATIVE: 409,
+  RECEIPT_NOT_REVERSIBLE: 422,
+  POSSIBLE_DUPLICATE_DOCUMENT: 409,
+  DOCUMENT_NOT_FOUND: 404,
+  SUPPLIER_NAME_CONFLICT: 409,
+  AI_EXTRACT_FAILED: 502,
+  STORAGE_UNAVAILABLE: 502,
   // Infra
   OFFLINE: 503,
   PROVIDER_ERROR: 502,
@@ -83,6 +96,18 @@ export const ERROR_MESSAGE = {
   COUNT_NOT_FOUND: "Không tìm thấy phiên kiểm kho.",
   COUNT_ALREADY_POSTED: "Phiên kiểm kho đã hoàn tất.",
   COUNT_INVALID_STATE: "Phiên kiểm kho không ở trạng thái phù hợp cho thao tác này.",
+  RECEIPT_NOT_FOUND: "Không tìm thấy phiếu nhập.",
+  RECEIPT_NO_LINES: "Thêm ít nhất một mặt hàng để tiếp tục.",
+  RECEIPT_INVALID_STATE: "Phiếu nhập không ở trạng thái phù hợp cho thao tác này.",
+  RECEIPT_ALREADY_POSTED: "Phiếu này đã được ghi nhận.",
+  RECEIPT_DUPLICATE_PRODUCT: "Một mặt hàng chỉ nên có một dòng trong phiếu.",
+  RECEIPT_REVERSE_NEGATIVE: "Không thể đảo phiếu vì hàng đã được bán hoặc sử dụng.",
+  RECEIPT_NOT_REVERSIBLE: "Chỉ phiếu đã ghi nhận mới có thể đảo.",
+  POSSIBLE_DUPLICATE_DOCUMENT: "Chứng từ này có thể đã được nhập trước đó.",
+  DOCUMENT_NOT_FOUND: "Không tìm thấy chứng từ.",
+  SUPPLIER_NAME_CONFLICT: "Tên nhà cung cấp đã tồn tại.",
+  AI_EXTRACT_FAILED: "Chưa đọc được chứng từ, bạn có thể nhập tay.",
+  STORAGE_UNAVAILABLE: "Chưa lưu được ảnh chứng từ. Vui lòng thử lại.",
   OFFLINE: "Không kết nối được máy chủ.",
   PROVIDER_ERROR: "Đối tác thanh toán tạm thời lỗi. Vui lòng thử lại.",
   INTERNAL: "Có lỗi xảy ra. Vui lòng thử lại.",
@@ -138,6 +163,9 @@ export function mapPgError(err) {
     }
     if (/product_categories_merchant_id_name_key/.test(msg)) {
       return new DomainError("CATEGORY_NAME_CONFLICT", undefined, { field: "name" });
+    }
+    if (/suppliers_merchant_id_name_key/.test(msg)) {
+      return new DomainError("SUPPLIER_NAME_CONFLICT", undefined, { field: "name" });
     }
   }
   // The service-can't-track-inventory guard is a 422 (spec 12.3 PRD-02).

@@ -237,6 +237,14 @@ export const IconRefresh = (p: P) => (
     <polyline points="21 3 21 9 15 9" />
   </Svg>
 );
+export const IconTruck = (p: P) => (
+  <Svg {...p}>
+    <path d="M1 3h12v11H1z" />
+    <path d="M13 7h4l3 3v4h-7z" />
+    <circle cx="6" cy="18" r="1.6" />
+    <circle cx="17" cy="18" r="1.6" />
+  </Svg>
+);
 export const IconAlert = (p: P) => (
   <Svg {...p}>
     <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />

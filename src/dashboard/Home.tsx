@@ -15,6 +15,7 @@ import {
   IconSettings,
   IconSparkle,
   IconTax,
+  IconTruck,
 } from "../components/icons";
 import { formatVnd, formatClockVN, formatBusinessDateVN } from "../lib/format";
 import {
@@ -444,6 +445,7 @@ function ServiceGrid() {
       { icon: <IconCart size={24} />, label: "Bán hàng", to: "/ban-hang", bg: "#0d7a6f" },
       { icon: <IconReceipt size={24} />, label: "Đơn hàng", to: "/don-hang", bg: "#2f6bd4" },
       { icon: <IconBox size={24} />, label: "Kho", to: "/kho", bg: "#6b4fd0" },
+      { icon: <IconTruck size={24} />, label: "Nhập hàng", to: "/nhap-hang", bg: "#b8562f" },
       { icon: <IconChart size={24} />, label: "Báo cáo", to: "/bao-cao", bg: "#1f9d6b" },
       { icon: <IconTax size={24} />, label: "Thuế", to: "/thue", bg: "#e08a1e" },
       { icon: <IconSettings size={24} />, label: "Cài đặt", to: "/cai-dat", bg: "#12314d" },

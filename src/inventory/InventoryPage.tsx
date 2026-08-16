@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/ui";
 import { Sheet } from "../sales/ui";
-import { IconBox, IconSearch, IconPlus, IconRefresh, IconClock } from "../components/icons";
+import { IconBox, IconSearch, IconPlus, IconRefresh, IconClock, IconTruck } from "../components/icons";
 import { useMerchant } from "../dashboard/MerchantContext";
 import { api } from "../lib/api";
 import type { InventoryLevel, InventoryFilter, InventoryOverview } from "../lib/api";
@@ -88,7 +88,8 @@ export function InventoryPage() {
 
         {canManage && (
           <div className="inv-actions">
-            <button className="btn btn--navy" onClick={() => nav("/ton-kho/kiem-kho/moi")}>Bắt đầu kiểm kho</button>
+            <button className="btn btn--navy" onClick={() => nav("/nhap-hang")}><IconTruck size={15} /> Nhập hàng</button>
+            <button className="btn btn--outline" onClick={() => nav("/ton-kho/kiem-kho/moi")}>Kiểm kho</button>
             {role === "owner" && <button className="btn btn--outline" onClick={() => nav("/ton-kho/doi-chieu")}><IconRefresh size={15} /> Đối chiếu</button>}
           </div>
         )}

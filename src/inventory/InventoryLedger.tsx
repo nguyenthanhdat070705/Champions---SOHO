@@ -131,7 +131,7 @@ export function InventoryLedger() {
                     <div className="mv-row__acts">
                       {m.source?.route && (
                         <button className="mv-row__link" onClick={() => nav(m.source!.route!)}>
-                          {m.source.kind === "order" ? "Xem bill" : m.source.kind === "return" ? "Xem phiếu trả" : m.source.kind === "count" ? "Xem phiên kiểm" : "Xem nguồn"}
+                          {m.source.kind === "order" ? "Xem bill" : m.source.kind === "return" ? "Xem phiếu trả" : m.source.kind === "count" ? "Xem phiên kiểm" : m.source.kind === "receipt" ? "Xem phiếu nhập" : "Xem nguồn"}
                           {m.source.label ? ` ${m.source.label}` : ""} <IconChevron size={13} />
                         </button>
                       )}

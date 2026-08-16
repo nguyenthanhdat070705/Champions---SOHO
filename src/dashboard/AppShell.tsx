@@ -20,7 +20,10 @@ export function AppShell() {
     /^\/ton-kho\/kiem-kho\/.+/.test(pathname) ||
     (/^\/ton-kho\/[^/]+$/.test(pathname) &&
       pathname !== "/ton-kho/kiem-kho" &&
-      pathname !== "/ton-kho/doi-chieu");
+      pathname !== "/ton-kho/doi-chieu") ||
+    // Receiving (F06): the receipt editor/detail carry their own bottom CTA; the
+    // list at /nhap-hang keeps the tab bar (its FAB clears the nav).
+    /^\/nhap-hang\/.+/.test(pathname);
   return (
     <>
       <Outlet />

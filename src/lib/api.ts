@@ -247,6 +247,42 @@ export const api = {
     request<{ sessionId: string; status: string }>("POST", `/v1/merchants/${merchantId}/inventory-counts/${sessionId}/cancel`, { body: {} }),
   chat: (merchantId: string, messages: ChatTurn[], signal?: AbortSignal) =>
     request<ChatResponse>("POST", "/v1/assistant/chat", { body: { merchantId, messages }, signal }),
+  // ── Functional 06 receiving (nhập hàng) ────────────────────────────────────
+  listReceipts: (merchantId: string, params: { status?: string; search?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status && params.status !== "all") qs.set("status", params.status);
+    if (params.search) qs.set("search", params.search);
+    const q = qs.toString();
+    return request<{ receipts: ReceiptSummary[] }>("GET", `/v1/merchants/${merchantId}/receiving/receipts${q ? "?" + q : ""}`);
+  },
+  createReceipt: (merchantId: string, body: { receivedAt?: string; supplierId?: string | null; supplierName?: string | null; documentId?: string | null; extraCostVnd?: number }, idempotencyKey: string) =>
+    request<{ receipt: Receipt; items: ReceiptItem[]; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/receiving/receipts`, { body, idempotencyKey }),
+  getReceipt: (merchantId: string, receiptId: string) =>
+    request<ReceiptDetail>("GET", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}`),
+  updateReceipt: (merchantId: string, receiptId: string, body: Record<string, unknown>) =>
+    request<{ receipt: Receipt }>("PATCH", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}`, { body }),
+  putReceiptItems: (merchantId: string, receiptId: string, body: { items: ReceiptItemInput[]; expectedRowVersion?: number }) =>
+    request<{ receipt: Receipt; items: ReceiptItem[] }>("PUT", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}/items`, { body }),
+  previewReceipt: (merchantId: string, receiptId: string) =>
+    request<ReceiptPreview>("POST", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}/preview`, { body: {} }),
+  postReceipt: (merchantId: string, receiptId: string, body: { expectedReceiptVersion?: number }, idempotencyKey: string) =>
+    request<ReceiptPostResult>("POST", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}/post`, { body, idempotencyKey }),
+  cancelReceipt: (merchantId: string, receiptId: string, expectedVersion?: number) =>
+    request<{ receiptId: string; status: string }>("POST", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}/cancel`, { body: { expectedVersion } }),
+  reverseReceipt: (merchantId: string, receiptId: string, body: { note?: string }, idempotencyKey: string) =>
+    request<{ receiptId: string; status: string; reversedMovements: unknown[]; replayed: boolean }>("POST", `/v1/merchants/${merchantId}/receiving/receipts/${receiptId}/reverse`, { body, idempotencyKey }),
+  listSuppliers: (merchantId: string, search?: string) => {
+    const q = search ? `?search=${encodeURIComponent(search)}` : "";
+    return request<{ suppliers: Supplier[] }>("GET", `/v1/merchants/${merchantId}/receiving/suppliers${q}`);
+  },
+  createSupplier: (merchantId: string, body: { name: string; phone?: string; note?: string }) =>
+    request<{ supplier: Supplier }>("POST", `/v1/merchants/${merchantId}/receiving/suppliers`, { body }),
+  uploadDocument: (merchantId: string, body: { image: string; mimeType: string; documentNumber?: string; extract?: boolean; force?: boolean }) =>
+    request<DocumentUploadResult>("POST", `/v1/merchants/${merchantId}/receiving/documents`, { body }),
+  extractDocument: (merchantId: string, documentId: string) =>
+    request<DocumentExtraction>("POST", `/v1/merchants/${merchantId}/receiving/documents/${documentId}/extract`, { body: {} }),
+  documentUrl: (merchantId: string, documentId: string) =>
+    request<{ url: string; expiresIn: number }>("GET", `/v1/merchants/${merchantId}/receiving/documents/${documentId}/url`),
 };
 
 // ── AI Assistant (Functional 10) ─────────────────────────────────────────────
@@ -327,4 +363,53 @@ export interface CountSessionView {
 export interface CountPostResult {
   sessionId: string; status: string; postedLines: number; replayed?: boolean;
   adjustments: { productId: string; delta: number; before: number; after: number; reasonCode: string }[];
+}
+
+// ── Functional 06 receiving ──────────────────────────────────────────────────
+export type ReceiptStatusT = "draft" | "extracting" | "review" | "ready" | "posted" | "reversed" | "cancelled";
+export interface Receipt {
+  id: string; receiptNumber: string; status: ReceiptStatusT; receivedAt: string;
+  supplierId: string | null; supplierName: string | null; documentId: string | null; documentNumber: string | null;
+  subtotalVnd: number; extraCostVnd: number; grandTotalVnd: number; rowVersion: number;
+  createdAt: string; postedAt: string | null;
+}
+export interface ReceiptSummary extends Receipt { itemCount: number; }
+export interface ReceiptItem {
+  id: string; productId: string; name: string; unitCode: string;
+  quantity: number; unitCostVnd: number; lineTotalVnd: number;
+  matchSource: string; matchConfidence: number | null;
+}
+export interface ReceiptItemInput { productId: string; quantity: number; unitCostVnd: number; matchSource?: string; matchConfidence?: number | null; }
+export interface ReceiptAccountingEvent { id: string; eventType: string; amountVnd: number; reviewStatus: string; createdAt: string; }
+export interface ReceiptMovement { id: string; productId: string; productName: string; movementType: string; quantityDelta: number; balanceAfter: number; createdAt: string; }
+export interface ReceiptDetail {
+  receipt: Receipt; items: ReceiptItem[];
+  accounting: ReceiptAccountingEvent[] | null; movements: ReceiptMovement[] | null;
+}
+export interface ReceiptPreviewLine { productId: string; name: string; unitCode: string; quantity: number; unitCostVnd: number; lineTotalVnd: number; before: number; delta: number; after: number; levelVersion: number; }
+export interface ReceiptPreview {
+  receipt: Receipt; lines: ReceiptPreviewLine[];
+  totals: { subtotalVnd: number; extraCostVnd: number; grandTotalVnd: number };
+  accountingPreview: { eventType: string; amountVnd: number; reviewStatus: string };
+}
+export interface ReceiptPostResult {
+  receiptId: string; receiptNumber: string; status: string; subtotalVnd: number; grandTotalVnd: number;
+  movements: { productId: string; movementId: string; delta: number; before?: number; after: number }[];
+  accountingEventId: string | null; rowVersion: number; replayed: boolean;
+}
+export interface Supplier { id: string; name: string; phone: string | null; note: string | null; }
+export interface DuplicateCandidate { receiptId: string; receiptNumber: string; status: string; totalVnd: number; }
+export interface ExtractedLine {
+  description: string; quantity: number | null; unitCode: string | null; unitCostVnd: number | null; confidence: number | null;
+  match?: { productId: string | null; name: string | null; source: string; confidence: number; candidates: { productId: string; name: string; sku: string | null; unitCode: string }[] };
+}
+export interface DocumentExtraction {
+  documentId: string; status: string; errorCode?: string; supplier: string | null; receivedDate: string | null; documentNumber: string | null;
+  lines: ExtractedLine[]; totalHintVnd: number | null;
+  fieldConfidence: { supplier: number | null; receivedDate: number | null; documentNumber: number | null };
+  warnings: string[];
+}
+export interface DocumentUploadResult {
+  documentId: string; objectKey: string; contentHash: string; documentNumber: string | null; capturedAt: string;
+  extraction?: DocumentExtraction;
 }

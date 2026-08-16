@@ -9,7 +9,11 @@ inventory. Functional 04: "Hàng hóa & dịch vụ" — full product catalog ma
 (searchable list, create/edit goods|service, categories, archive/deactivate, price
 history, AI label-photo → draft). Functional 05: "Tồn kho cơ bản" — the reliable inventory
 ledger: on-hand/available views, manual adjustments (reason + optimistic version), movement
-reversal, and stock counts (kiểm kê) with blind counting + atomic variance posting. Functional 10:
+reversal, and stock counts (kiểm kê) with blind counting + atomic variance posting. Functional 06:
+"Nhập hàng" — goods receiving: form-first purchase receipts (supplier snapshot, lines, server totals)
++ a photo path (chụp chứng từ → private storage → Gemini extraction → line-match review) that raise
+stock via one 'purchase_receipt' movement per line and create ONE pending accounting_event, all
+atomic; posted receipts are immutable (reverse appends opposite movements). Functional 10:
 "Trợ lý SoHo" — a Vietnamese, grounded, read-only AI chat assistant over the merchant's own data.
 Vite + React + TS SPA. F1/F2 reads talk **directly to Supabase** under RLS; **F3/F4/F5
 money/inventory/catalog mutations and the F10 assistant go through the combined Node
@@ -20,6 +24,7 @@ server**, which also hosts the pre-existing PayOS API. Specs:
 starts at "ĐẶC TẢ FUNCTIONAL 03"),
 `/home/nguye/firstmate/data/soho-f4-catalog/soho-functional-04.md`,
 `/home/nguye/firstmate/data/soho-f5-inventory/soho-functional-05.md`,
+`/home/nguye/firstmate/data/soho-f6-receiving/soho-functional-06.md`,
 `/home/nguye/firstmate/data/soho-ai-assistant/soho-functional-10.md` (+ the
 `amendment-01-official-spec.md` deltas: source cards, quick actions, microcopy).
 
@@ -109,6 +114,24 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   the two-step `AdjustSheet`). Pure helpers mirror the server in `src/lib/inventory.ts` (unit-tested).
   All calls go through `src/lib/api.ts`. `MerchantContext` now exposes `role` (via `loadMyRole`) for UI
   gating — owner/manager adjust/count/reverse; cashier is view-only (server enforces the same).
+- **Functional 06 server (`server/f6/`, reuses F3 auth/pool/audit/errors + the F5 movement service):**
+  `receipts.js` is the core — create/get/list/update/`putItems` (replaces the full line set, snapshots
+  name/unit, server-computes line/subtotal/grand totals via `receiving-math.js`, rejects duplicate
+  product) / `previewReceipt` (per-line stock impact, sets `ready`) / `postReceipt` (ONE txn: one
+  `purchase_receipt` movement per line via `postMovementTx`, product_id lock order, + ONE
+  `accounting_event` `purchase_received` pending, idempotent) / `cancelReceipt` / `reverseReceipt`
+  (opposite `reversal` movements + a `reversed` event; blocked if it would drive stock negative).
+  `documents.js` = upload + content-hash dedupe + Gemini extract + product line-match; `storage.js` =
+  the private `documents` bucket (provisioned idempotently over the pooler) uploaded/signed with the
+  CALLER's JWT (no service_role); `gemini.js` = receipt photo → structured draft; `suppliers.js` =
+  minimal suppliers. `receiving-math.js` is pure + unit-tested (`test/f6-receiving.test.js`). Routes
+  under `/v1/merchants/:mid/receiving/{receipts,receipts/:id/*,suppliers,documents,documents/:id/*}`.
+- **Functional 06 client (`src/receiving/`):** `ReceivingList.tsx` (route `/nhap-hang`, list + method
+  chooser FAB), `ReceiptScreen.tsx` (loads `/nhap-hang/:id` → `ReceiptEditor` while editable, else
+  read-only `ReceiptDetail`), `parts.tsx` (supplier/product pickers, line-edit + AI review sheets).
+  Pure mirror in `src/lib/receiving.ts` (unit-tested). The F5 ledger now deep-links
+  `purchase_receipt` movements back to `/nhap-hang/:receiptId`. Home + Inventory expose a "Nhập hàng"
+  entry; owner/manager only (server enforces).
 
 ## Sharp edges (read before changing)
 - **Do NOT run DB migrations.** The Supabase schema (10 tables, enums, RLS, triggers, and the
@@ -202,7 +225,34 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
 - **F5 screens with a `.form-foot` bottom CTA must be `immersive` in `AppShell.tsx`** (bottom-nav
   hidden) or the fixed footer overlaps the tab bar and taps mis-fire — `/ton-kho/:productId`,
   `/ton-kho/kiem-kho/*` are immersive; the FAB/list screens (`/ton-kho`, `/ton-kho/kiem-kho`,
-  `/ton-kho/doi-chieu`) keep the nav.
+  `/ton-kho/doi-chieu`) keep the nav. Same rule for F06: `/nhap-hang/:id` (editor/detail) is immersive;
+  `/nhap-hang` (list) keeps the nav.
+- **F6 schema quirks (deployed, don't re-derive):** `purchase_receipts` has **NO `note` column** (spec
+  3.3 lists one; the migration dropped it — omit note). `received_at` is a `date`; node-pg returns it as
+  a Date at LOCAL midnight, so return `to_char`/local-components as `YYYY-MM-DD` (`dateOnly` in
+  `receipts.js`), never `toISOString()` (TZ-shifts the day). `suppliers` is name/phone/note only (unique
+  `(merchant_id, name)`, NO tax_code). `accounting_events` unique is `(source_type, source_id,
+  event_type)` and `review_status ∈ {pending,reviewed,rejected}` (F07/F08 consume these). There are NO
+  F6 DB functions — all txns run in Node via the pooler (F3/F4/F5 pattern).
+- **F6 storage:** the private `documents` bucket + its merchant-scoped `storage.objects` RLS policy are
+  provisioned idempotently over the pooler (`ensureDocumentsBucket` in `server/f6/storage.js`); byte
+  upload/download/sign go through the Storage REST API with the **caller's JWT** (path prefix
+  `<merchant_id>/…` → the policy is the tenant guard), so no service_role secret is needed. Dedupe is by
+  `content_hash`; an exact-hash or matching-`document_number` hit → 409 `POSSIBLE_DUPLICATE_DOCUMENT`
+  with candidate receipts (owner/manager may `force`). Extraction failure returns a `status:'failed'`
+  marker (document kept) — never throws away the upload (REC-FR-12).
+- **F6 movement/idempotency:** each line posts a `purchase_receipt` movement with
+  `reference_type='purchase_receipt'`, `reference_id=receipt_id`, `source_line_id=item_id` — the
+  `(product_id, movement_type, reference_type, reference_id)` unique index means a receipt must have at
+  most ONE line per product (`putItems` rejects duplicate products). Post/reverse take an
+  `Idempotency-Key` (in-process single-flight); a posted-receipt replay rebuilds the same result.
+- **F6 live E2E:** `F6_BASE=http://localhost:<port> node --env-file=.env test/f6-e2e.mjs` (server
+  running with `.env` + a non-3000 `PORT`) runs the spec 12.3 P0 matrix (draft-no-stock, server
+  totals, post = N movements + 1 event, idempotent replay, dup-doc warn, RLS cross-tenant, reverse +
+  reverse-negative block, reconciliation clean) on `soho-crew-test+f6@soho.test` (+ `+f6b` for RLS)
+  via `test/f6-setup.mjs` `ensureF6`. Not in `npm test` (`.mjs`, needs DB). NB: the pooler holds a
+  txn open for a whole handler, so a killed server / abandoned fetch can leave an `idle in transaction`
+  backend holding a row lock — a test artifact, not a bug (terminate it or restart the pooler).
 
 ## Maintaining this file
 

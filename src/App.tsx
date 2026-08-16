@@ -25,6 +25,8 @@ import { CountList } from "./inventory/CountList";
 import { CountCreate } from "./inventory/CountCreate";
 import { CountSession } from "./inventory/CountSession";
 import { Reconciliation } from "./inventory/Reconciliation";
+import { ReceivingList } from "./receiving/ReceivingList";
+import { ReceiptScreen } from "./receiving/ReceiptScreen";
 
 type Phase = "loading" | "onboarding" | "app";
 
@@ -96,6 +98,8 @@ export default function App() {
             <Route path="/ton-kho/kiem-kho/moi" element={<CountCreate />} />
             <Route path="/ton-kho/kiem-kho/:id" element={<CountSession />} />
             <Route path="/ton-kho/:productId" element={<InventoryLedger />} />
+            <Route path="/nhap-hang" element={<ReceivingList />} />
+            <Route path="/nhap-hang/:id" element={<ReceiptScreen />} />
             <Route path="/bao-cao" element={<ReportsPage />} />
             <Route path="/thue" element={<TaxPage />} />
             <Route path="/cai-dat" element={<SettingsPage />} />

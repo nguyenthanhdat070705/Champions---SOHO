@@ -4,7 +4,7 @@
 // touching money/inventory (NFR-04); the client never supplies a trusted
 // user/merchant id. Errors are mapped to the spec 11.1 contract.
 import { DomainError, mapPgError } from "./errors.js";
-import { verifyUser, requireMembership, SELLING_ROLES, PRIVILEGED_ROLES } from "./auth.js";
+import { verifyUser, requireMembership, getBearerToken, SELLING_ROLES, PRIVILEGED_ROLES } from "./auth.js";
 import { hasDatabase } from "../db/pool.js";
 import { devEndpointsEnabled } from "./env.js";
 import { listProducts, quickCreateProduct } from "./catalog.js";
@@ -29,6 +29,12 @@ import {
   cancelCountSession, listCountSessions,
 } from "../f5/counts.js";
 import { assistantChat } from "../assistant/index.js";
+import {
+  createReceipt, getReceipt, listReceipts, updateReceipt, putItems,
+  previewReceipt, postReceipt, cancelReceipt, reverseReceipt,
+} from "../f6/receipts.js";
+import { listSuppliers, createSupplier } from "../f6/suppliers.js";
+import { createDocument, extractDocument, getDocumentUrl } from "../f6/documents.js";
 import { query } from "../db/pool.js";
 
 const MAX_BODY = 1024 * 1024;
@@ -311,6 +317,106 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId);
     sendJson(c.res, 200, await getCountSession(merchantId, sessionId));
+  }],
+
+  // ── Functional 06: goods receiving (nhập hàng) ────────────────────────────
+  // Suppliers (minimal). More specific paths first, then receipts/:id catch.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/receiving\/suppliers$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await listSuppliers(merchantId, { search: c.url.searchParams.get("search") || undefined }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/suppliers$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 201, await createSupplier(merchantId, userId, await readBody(c.req)));
+  }],
+  // Documents: upload + dedupe (+ inline extract), retry-extract, signed URL.
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/documents$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const token = getBearerToken(c.req);
+    sendJson(c.res, 201, await createDocument(merchantId, userId, token, await readBody(c.req)));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/documents\/([^/]+)\/extract$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const token = getBearerToken(c.req);
+    sendJson(c.res, 200, await extractDocument(merchantId, userId, token, documentId));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/receiving\/documents\/([^/]+)\/url$/, async (c) => {
+    const [merchantId, documentId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const token = getBearerToken(c.req);
+    sendJson(c.res, 200, await getDocumentUrl(merchantId, token, documentId));
+  }],
+  // Receipts CRUD + lifecycle.
+  ["GET", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    const sp = c.url.searchParams;
+    sendJson(c.res, 200, await listReceipts(merchantId, {
+      status: sp.get("status") || undefined, search: sp.get("search") || undefined, limit: sp.get("limit") || undefined,
+    }));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await createReceipt(merchantId, userId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)\/preview$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await previewReceipt(merchantId, userId, receiptId));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)\/post$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await postReceipt(merchantId, userId, role, receiptId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)\/cancel$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await cancelReceipt(merchantId, userId, receiptId, body.expectedVersion));
+  }],
+  ["POST", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)\/reverse$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    const { role } = await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const result = await reverseReceipt(merchantId, userId, role, receiptId, await readBody(c.req), idemKey(c.req));
+    sendJson(c.res, result.replayed ? 200 : 201, result);
+  }],
+  ["PUT", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)\/items$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    sendJson(c.res, 200, await putItems(merchantId, userId, receiptId, await readBody(c.req)));
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId);
+    sendJson(c.res, 200, await getReceipt(merchantId, receiptId));
+  }],
+  ["PATCH", /^\/v1\/merchants\/([^/]+)\/receiving\/receipts\/([^/]+)$/, async (c) => {
+    const [merchantId, receiptId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, PRIVILEGED_ROLES);
+    const body = await readBody(c.req);
+    sendJson(c.res, 200, await updateReceipt(merchantId, userId, receiptId, body, body.expectedVersion));
   }],
 
   // ── Preview / draft ──────────────────────────────────────────────────────
