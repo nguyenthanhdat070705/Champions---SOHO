@@ -341,6 +341,18 @@ starts at "ĐẶC TẢ FUNCTIONAL 03"),
   (merchant, key). `finalizeCash` re-checks the key AFTER taking the order `FOR UPDATE` lock so two
   concurrent same-key taps return the SAME payment (SALE-03), not a 409. `provider_event_id` = PayOS
   webhook `reference` dedupes duplicate webhooks (QR-03).
+- **F3 stale-payment guard (`createOrder` idempotency is on `client_request_id`):** `createOrder`
+  (sales.js) replays the EXISTING order for a known `client_request_id`, ignoring new items, and
+  `lockOrder` short-circuits an already-`awaiting_payment` order. So the POS client must NEVER reuse a
+  `clientRequestId` across a new bill (SalesFlow persists `{clientRequestId, cart}` in localStorage;
+  the old bug reused a stale id → the payment screen showed an old awaiting bill's total). The fix:
+  before locking, `SalesFlow.proceedToPayment` probes `GET /v1/merchants/:mid/outstanding-bill`
+  (`getOutstandingBill`, cashier-scoped) and, if another awaiting_payment bill exists, shows an explicit
+  dialog — [Thanh toán bill đó] (pay it, keep the current cart, mint a fresh id) / [Hủy bill đó & tiếp
+  tục] (`cancelOrder` the stale one, then lock the current cart under a FRESH id). Pure decision helpers
+  in `src/lib/checkout.ts` (`proceedDecision`/`canLockCreated`, unit-tested); `lockCurrentCart` never
+  locks a non-draft createOrder result. Live regression: `test/fix-stale-payment-e2e.mjs`
+  (+ `-setup.mjs`, `soho-crew-test+fix1@soho.test`) — not in `npm test` (`.mjs`, needs DB).
 - **PayOS webhook (`/api/payos/webhook`)**: keeps the byte-compatible test-event + forward behavior;
   when `DATABASE_URL` is set it instead drives the F3 confirm transaction. Real webhooks can't reach a
   laptop, so the **dev-only** `POST /v1/dev/payos/simulate` (guarded by `SOHO_DEV_ENDPOINTS=1` +

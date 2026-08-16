@@ -200,6 +200,8 @@ export const api = {
     return request<{ orders: (OrderView["order"] & { itemCount: number; paidMethod: string | null })[] }>("GET", `/v1/merchants/${merchantId}/orders${q ? "?" + q : ""}`);
   },
   activeDraft: (merchantId: string) => request<OrderView | { order: null }>("GET", `/v1/merchants/${merchantId}/active-draft`),
+  outstandingBill: (merchantId: string, excludeOrderId?: string) =>
+    request<OrderView | { order: null }>("GET", `/v1/merchants/${merchantId}/outstanding-bill${excludeOrderId ? `?excludeOrderId=${encodeURIComponent(excludeOrderId)}` : ""}`),
   cancelOrder: (orderId: string, expectedVersion: number) => request<OrderView>("POST", `/v1/orders/${orderId}/cancel`, { body: { expectedVersion } }),
   lockOrder: (orderId: string, expectedVersion: number) => request<OrderView>("POST", `/v1/orders/${orderId}/lock`, { body: { expectedVersion } }),
   unlockOrder: (orderId: string, expectedVersion: number) => request<OrderView>("POST", `/v1/orders/${orderId}/unlock`, { body: { expectedVersion } }),

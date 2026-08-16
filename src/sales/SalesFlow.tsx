@@ -13,7 +13,9 @@ import {
   setLineDiscount, setLineNote, setOrderDiscount, setQuantity, toApiPayload, totalQuantity,
 } from "./cartStore";
 import type { CartState, LineDiscount } from "./cartStore";
-import { useUndoToast } from "./ui";
+import { proceedDecision, canLockCreated } from "../lib/checkout";
+import { formatVnd } from "../lib/format";
+import { useUndoToast, Sheet } from "./ui";
 import { QuickCreateSheet, ScanSheet, DiscountSheet } from "./sheets";
 import { ProductPicker } from "./ProductPicker";
 import { CartView } from "./CartView";
@@ -47,6 +49,13 @@ export function SalesFlow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ orderId: string; total: number; method: string; changeDue: number } | null>(null);
+  // An unpaid bill still sitting at awaiting_payment when the cashier presses
+  // "Tiếp tục" on a DIFFERENT cart → we surface an explicit choice instead of
+  // silently reusing it (the F3 stale-payment hotfix). `keepCartAfterPay` is set
+  // when the cashier chooses to pay that older bill first, so paying it does NOT
+  // wipe the current cart draft.
+  const [outstanding, setOutstanding] = useState<OrderView | null>(null);
+  const [keepCartAfterPay, setKeepCartAfterPay] = useState(false);
 
   // sheets
   const [scanOpen, setScanOpen] = useState(false);
@@ -137,20 +146,70 @@ export function SalesFlow() {
   const clearCart = () => { setCart(emptyCart()); setPreview(null); setOrder(null); setClientRequestId(newIdempotencyKey()); };
 
   // ── checkout: create/update draft on server + lock (reserve stock) ─────────
+  // Lock the CURRENT cart as its own fresh bill and go to the payment screen.
+  // `reqId` lets a caller force a brand-new client_request_id so the server's
+  // idempotent createOrder builds a NEW order from the current cart instead of
+  // replaying an older order bound to a reused id (the stale-payment bug).
+  async function lockCurrentCart(reqId: string = clientRequestId) {
+    const { items, adjustments } = toApiPayload(cart);
+    let ord = order;
+    if (!ord || ord.order.status !== "draft") {
+      ord = await api.createOrder(merchantId, { clientRequestId: reqId, items, adjustments, note: cart.note });
+    } else {
+      ord = await api.updateOrder(ord.order.id, { expectedVersion: ord.order.version, items, adjustments, note: cart.note });
+    }
+    // Guard: createOrder may idempotently replay a non-draft order (reused id).
+    // Never proceed to payment on such an order — surface it as an outstanding
+    // bill so the cashier decides explicitly.
+    if (!canLockCreated(ord.order.status)) { setOutstanding(ord); return; }
+    if (reqId !== clientRequestId) setClientRequestId(reqId);
+    const locked = await api.lockOrder(ord.order.id, ord.order.version);
+    setOrder(locked);
+    setStep("method");
+  }
+
   async function proceedToPayment() {
     if (!merchantId || isEmpty(cart)) return;
     setBusy(true); setError(null);
     try {
-      const { items, adjustments } = toApiPayload(cart);
-      let ord = order;
-      if (!ord) {
-        ord = await api.createOrder(merchantId, { clientRequestId, items, adjustments, note: cart.note });
-      } else {
-        ord = await api.updateOrder(ord.order.id, { expectedVersion: ord.order.version, items, adjustments, note: cart.note });
+      // Is another bill for this cashier still awaiting payment? If so, don't
+      // silently reuse it — ask what to do (spec: explicit choice, no auto-cancel).
+      const res = await api.outstandingBill(merchantId, order?.order.id);
+      if (res.order && proceedDecision(res.order.id, order?.order.id) === "show-dialog") {
+        setOutstanding(res); setBusy(false); return;
       }
-      const locked = await api.lockOrder(ord.order.id, ord.order.version);
-      setOrder(locked);
-      setStep("method");
+      await lockCurrentCart();
+    } catch (e) {
+      handleCheckoutError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Dialog action: pay the older outstanding bill first. Keep the current cart
+  // draft intact (give it a fresh client_request_id so it decouples from the
+  // bill we're about to pay), navigate straight to that bill's payment screen.
+  function payOutstandingBill() {
+    if (!outstanding) return;
+    const paid = outstanding;
+    setOutstanding(null);
+    setClientRequestId(newIdempotencyKey());
+    setKeepCartAfterPay(true);
+    setOrder(paid);
+    setError(null);
+    setStep("method");
+  }
+
+  // Dialog action: cancel the stale bill (releases its reservations via the
+  // existing cancel endpoint), then lock the current cart under a FRESH id.
+  async function cancelOutstandingAndContinue() {
+    if (!outstanding) return;
+    const stale = outstanding;
+    setOutstanding(null);
+    setBusy(true); setError(null);
+    try {
+      await api.cancelOrder(stale.order.id, stale.order.version);
+      await lockCurrentCart(newIdempotencyKey());
     } catch (e) {
       handleCheckoutError(e);
     } finally {
@@ -175,6 +234,7 @@ export function SalesFlow() {
   }
 
   async function backFromMethod() {
+    setKeepCartAfterPay(false);
     if (order) {
       try { const un = await api.unlockOrder(order.order.id, order.order.version); setOrder(un); }
       catch { /* a pending QR keeps it locked; stay consistent and just go back */ }
@@ -184,7 +244,14 @@ export function SalesFlow() {
 
   function onPaid(info: { orderId: string; total: number; method: string; changeDue: number }) {
     setSuccess(info);
-    clearCart();
+    if (keepCartAfterPay) {
+      // We just paid an older outstanding bill — the current cart is a separate,
+      // intact draft; leave it (and its fresh id) alone, only drop the paid order.
+      setKeepCartAfterPay(false);
+      setOrder(null);
+    } else {
+      clearCart();
+    }
     setStep("success");
   }
 
@@ -293,6 +360,34 @@ export function SalesFlow() {
         onClose={() => setDiscountTarget(null)}
         onApply={applyDiscount}
       />
+
+      <Sheet
+        open={outstanding !== null}
+        onClose={() => setOutstanding(null)}
+        title="Còn bill chưa thanh toán"
+        footer={
+          <div className="pay-choice__actions">
+            <button className="btn btn--primary" disabled={busy} onClick={payOutstandingBill}>
+              Thanh toán bill đó
+            </button>
+            <button className="btn btn--danger" disabled={busy} onClick={cancelOutstandingAndContinue}>
+              {busy ? <span className="spinner spinner--sm" /> : "Hủy bill đó & tiếp tục giỏ mới"}
+            </button>
+          </div>
+        }
+      >
+        {outstanding && (
+          <div className="pay-choice">
+            <p className="pay-choice__lead">
+              Bạn còn bill <b>{outstanding.order.orderNumber}</b> chưa thanh toán:
+            </p>
+            <div className="pay-choice__amt">{formatVnd(outstanding.order.totalAmount)}</div>
+            <p className="pay-choice__hint">
+              Chọn thanh toán bill cũ trước, hoặc hủy nó để tiếp tục với giỏ hàng hiện tại.
+            </p>
+          </div>
+        )}
+      </Sheet>
 
       {undo.node}
     </>

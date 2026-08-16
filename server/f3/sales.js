@@ -507,6 +507,25 @@ export async function getActiveDraft(merchantId, userId) {
   return loadFullOrderTx(getPool(), merchantId, rows[0].id);
 }
 
+/**
+ * GET the cashier's outstanding awaiting_payment bill, if any (hotfix guard).
+ * Used by the POS "Tiếp tục thanh toán" flow to detect a still-unpaid locked
+ * bill BEFORE creating a new one, so we never silently reuse it. Scoped to the
+ * caller (merchant + cashier). `excludeOrderId` skips the current live order.
+ */
+export async function getOutstandingBill(merchantId, userId, excludeOrderId) {
+  const params = [merchantId, userId];
+  let where = `merchant_id=$1 and cashier_user_id=$2 and status='awaiting_payment'`;
+  if (excludeOrderId) { params.push(excludeOrderId); where += ` and id <> $${params.length}`; }
+  const { rows } = await query(
+    `select id from public.orders where ${where} order by created_at desc limit 1`,
+    params,
+  );
+  if (rows.length === 0) return { order: null };
+  const { getPool } = await import("../db/pool.js");
+  return loadFullOrderTx(getPool(), merchantId, rows[0].id);
+}
+
 /** Cancel a draft/awaiting bill (spec 2.1 cancelled). */
 export async function cancelOrder(merchantId, userId, orderId, expectedVersion) {
   return withTransaction(async (client) => {

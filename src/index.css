@@ -1724,6 +1724,13 @@ select.input {
 .sheet__foot { padding: 12px 18px calc(env(safe-area-inset-bottom) + 16px); border-top: 1px solid var(--line); }
 .sheet__foot .btn { min-height: 50px; }
 
+/* Outstanding-bill choice dialog (F3 stale-payment guard) */
+.pay-choice { text-align: center; padding: 6px 0 4px; }
+.pay-choice__lead { color: var(--ink); font-size: 15px; margin: 0 0 8px; }
+.pay-choice__amt { font-size: 30px; font-weight: 800; color: var(--navy); margin: 4px 0 10px; }
+.pay-choice__hint { color: var(--muted); font-size: 13px; margin: 0; line-height: 1.45; }
+.pay-choice__actions { display: flex; flex-direction: column; gap: 10px; }
+
 /* Switch row (quick-create) */
 .switch-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; gap: 14px; }
 .switch-row__t { font-weight: 700; color: var(--ink); font-size: 15px; }

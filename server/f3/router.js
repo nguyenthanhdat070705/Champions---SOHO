@@ -15,7 +15,7 @@ import {
 import { aiProductPreview, aiConfirmSuggestion } from "./ai_products.js";
 import {
   preview, createOrder, updateOrder, lockOrder, unlockOrder, cancelOrder,
-  getOrder, listOrders, getActiveDraft,
+  getOrder, listOrders, getActiveDraft, getOutstandingBill,
 } from "./sales.js";
 import {
   finalizeCash, createQrPayment, getPaymentStatus, cancelPayment, confirmQrPayment,
@@ -686,6 +686,14 @@ const ROUTES = [
     const { userId } = await verifyUser(c.req);
     await requireMembership(userId, merchantId, SELLING_ROLES);
     const result = await getActiveDraft(merchantId, userId);
+    sendJson(c.res, 200, result);
+  }],
+  ["GET", /^\/v1\/merchants\/([^/]+)\/outstanding-bill$/, async (c) => {
+    const [merchantId] = c.params;
+    const { userId } = await verifyUser(c.req);
+    await requireMembership(userId, merchantId, SELLING_ROLES);
+    const excludeOrderId = c.url.searchParams.get("excludeOrderId") || undefined;
+    const result = await getOutstandingBill(merchantId, userId, excludeOrderId);
     sendJson(c.res, 200, result);
   }],
 
